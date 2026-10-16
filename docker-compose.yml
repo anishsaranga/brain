@@ -1,0 +1,84 @@
+services:
+  brain-neo4j:
+    image: neo4j:2026.09.0
+    container_name: brain-neo4j
+    # Loopback only. 7474 is the Neo4j Browser — a full write console with no
+    # auth worth the name on Community — so it is NEVER routed through the
+    # Cloudflare Tunnel. Reach it over Tailscale instead. 7687 (Bolt) is bound
+    # for host-side scripts (backups, cypher-shell); the web container reaches
+    # Neo4j over the internal network, not through these.
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    environment:
+      # Only applied on the FIRST boot of an empty data volume. See .env.example.
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      # NOT NEO4J_-prefixed: the neo4j image parses every NEO4J_* env var as a
+      # server config setting, and "NEO4J_PASSWORD" makes it refuse to start
+      # with "Unrecognized setting: PASSWORD". This one is only for the
+      # healthcheck below.
+      - BRAIN_NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      # Capped deliberately. The Docker VM on this box has ~7.7 GiB total and
+      # already hosts nine other containers; an uncapped JVM would happily take
+      # a multiple of this.
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512m
+      - TZ=${TZ:-Asia/Kolkata}
+    volumes:
+      - brain-neo4j-data:/data
+      - brain-neo4j-logs:/logs
+      # Host-visible so backups can be copied off the box without docker cp.
+      - ./backups:/backups
+    healthcheck:
+      # The web container waits on this. Bolt takes 20-40s to open, and without
+      # a real query here `depends_on` would release too early.
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${BRAIN_NEO4J_PASSWORD}\" 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  brain-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: brain-web
+    # Loopback only — the Cloudflare Tunnel reaches it via localhost:9999.
+    ports:
+      - "127.0.0.1:9999:9999"
+    environment:
+      - NODE_ENV=production
+      - NEO4J_URI=bolt://brain-neo4j:7687
+      - NEO4J_USER=neo4j
+      # `brain` has day-boundary logic (what is due today), which makes it the
+      # second service on this box after bathroom-status where UTC vs local
+      # actually changes behaviour. Debian ships tzdata, so unlike that one
+      # there is no extra package to install.
+      - TZ=${TZ:-Asia/Kolkata}
+    env_file:
+      - .env
+    volumes:
+      - brain-data:/app/data
+    depends_on:
+      brain-neo4j:
+        condition: service_healthy
+    healthcheck:
+      # node's global fetch, so the image needs neither curl nor wget.
+      # 127.0.0.1 (not localhost): Next binds IPv4 and localhost may resolve ::1.
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:9999/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  brain-neo4j-data:
+  brain-neo4j-logs:
+  brain-data:
