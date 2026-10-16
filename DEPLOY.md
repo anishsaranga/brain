@@ -378,9 +378,110 @@ monthly dump), mirrored off-box to OneDrive, with the restore rehearsed by 23
 round-trip checks on every run and freshness reported by /api/health. The one
 remaining manual step is registering the scheduled tasks.
 
-Remaining: the nine MCP tools, explorer, review session, then OAuth DCR.
+**Milestone 4 — MCP tools + auth.** Done. Thirteen tools and two prompts, a
+single-admin auth gate on the web app, soft delete, undoable batches, and 46
+checks covering the security refusals as well as the behaviour.
+
+Remaining: the explorer (milestone 5), the review session (6), hygiene
+surfaces (7), then OAuth DCR.
 
 Still **not** publicly exposed. Six things remain yours to do, all by choice:
 the WAF rule, DNS, tunnel ingress, the claude.ai connector, the runbook row,
 and `scripts/register-backup-tasks.ps1`. Until that last one runs, the backup
 scripts work but nothing calls them on a schedule.
+
+The web app now has an auth gate, so exposure is no longer waiting on one being
+built. `DEPLOY.local.md` (gitignored) has the real values for each step.
+
+## The MCP tool surface
+
+Thirteen tools and two prompts, at `/mcp/<MCP_PATH_SECRET>`. The design
+constraint throughout is that this is **write access to the knowledge base,
+driven by a language model, over a public endpoint** — and that content
+ingested today is read back into other conversations weeks later, which is
+indirect prompt injection by construction.
+
+**No tool reachable over MCP is irreversible:**
+
+| Operation | Reversible by |
+|---|---|
+| create / merge | `undo_ingest(batchId)` — every write belongs to a batch |
+| update a body | the previous 5 revisions are kept on the node |
+| delete | a tombstone; the node and its links survive |
+| hard removal | **not a tool** — the UI, by hand |
+
+Supporting rules:
+
+- **Delete takes one id.** There is no delete-by-query and no bulk form, so a
+  successful injection costs one concept per call, each visible in the
+  transcript.
+- **Caps**: 30 concepts and 100 links per `remember`, 50k characters per body.
+  Exceeding one is a rejection with nothing written, never a silent
+  truncation. They also protect the process — embedding is in-process and
+  CPU-bound, so a 300-concept call would pin the container long enough to fail
+  its own healthcheck.
+- **Results carry an untrusted-data envelope** stating that stored content is
+  data, not instructions.
+- **Errors are sanitised** and the path secret is redacted from them.
+
+### `remember` asks rather than guesses
+
+Per concept the result is `created`, `merged` or **`ambiguous`**. Ambiguous
+writes nothing and returns candidates for an explicit decision; everything
+unambiguous in the same call is still written, because rejecting a batch over
+one fuzzy match would throw away a conversation's worth of knowledge.
+
+The threshold is 0.80 cosine, measured rather than guessed:
+
+```
+WAL                 <-> Write-ahead logging   0.835   same thing
+Write-ahead log     <-> Write-ahead logging   0.992   same thing
+Write-ahead logging <-> Crash recovery        0.750   related, distinct
+Backpressure        <-> unrelated             0.55-0.58
+```
+
+An earlier 0.85 let "WAL" through as a new concept. Both sides of the line are
+pinned by regression checks, so moving it breaks a test rather than silently
+changing behaviour.
+
+### `cypher_read` is allowlisted, and here is why
+
+A READ transaction does refuse graph writes — that part is enforced by the
+database. But read mode does **not** cover the administrative surface. All of
+these succeed inside one, verified on this server:
+
+```
+CALL dbms.listConfig()   ->  194 config entries
+SHOW USERS               ->  1
+SHOW TRANSACTIONS        ->  1
+SHOW DATABASES           ->  2
+```
+
+So the guard is a positive allowlist: a query must start with MATCH, OPTIONAL,
+WITH, UNWIND or RETURN, and may not contain `CALL`, `SHOW`, `TERMINATE`,
+`LOAD` or any write clause. Comments and string literals are stripped before
+scanning, so a keyword cannot be hidden in a comment. `LOAD CSV` is refused
+outright: `file://` is already blocked by Neo4j's config, but the `http://`
+case was inconclusive when probed, and it would be an SSRF primitive.
+
+## Web UI auth
+
+Auth.js v5, single admin from `.env` (`ADMIN_USERNAME` plus `ADMIN_PASSWORD`
+or a bcrypt `ADMIN_PASSWORD_HASH`). `middleware.ts` gates everything except:
+
+- **`/mcp/*`** — it has its own auth, and sending a connector an HTML login
+  redirect would fail in a way that looks like a network fault.
+- **`/api/health`** — the compose healthcheck calls it with no session. It
+  answers anonymous callers with `{ok, backupStale}` only; the Neo4j version,
+  schema counts and backup filenames are a small map of the box and stay
+  behind a session.
+
+## Checks
+
+```bash
+docker compose -f docker-compose.test.yml up -d
+npm run graph:check      # 29 — graph core
+npm run backup:check     # 23 — export/restore round trip
+npm run tools:check      # 46 — tool behaviour and the security refusals
+docker compose -f docker-compose.test.yml down
+```

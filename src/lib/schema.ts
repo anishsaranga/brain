@@ -20,6 +20,11 @@ const STATEMENTS: string[] = [
   // `aliases` is the pressure valve for the same idea under another name.
   "CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (c:Concept) REQUIRE c.id IS UNIQUE",
   "CREATE CONSTRAINT concept_name IF NOT EXISTS FOR (c:Concept) REQUIRE c.name IS UNIQUE",
+  // `nameLower` carries the real uniqueness rule. Without it "Raft" and "raft"
+  // are two nodes — exactly the duplicate the whole dedupe handshake exists to
+  // prevent, and the first thing that happens in practice once a model is
+  // writing names. `name` stays the display form; this one is the identity.
+  "CREATE CONSTRAINT concept_name_lower IF NOT EXISTS FOR (c:Concept) REQUIRE c.nameLower IS UNIQUE",
   "CREATE CONSTRAINT topic_id IF NOT EXISTS FOR (t:Topic) REQUIRE t.id IS UNIQUE",
   "CREATE CONSTRAINT topic_name IF NOT EXISTS FOR (t:Topic) REQUIRE t.name IS UNIQUE",
   "CREATE CONSTRAINT source_id IF NOT EXISTS FOR (s:Source) REQUIRE s.id IS UNIQUE",
@@ -29,6 +34,9 @@ const STATEMENTS: string[] = [
   // Review queue lookups: "what is due, among tracked concepts".
   "CREATE INDEX concept_due IF NOT EXISTS FOR (c:Concept) ON (c.due)",
   "CREATE INDEX concept_tracked IF NOT EXISTS FOR (c:Concept) ON (c.tracked)",
+  // Soft delete: every read path filters on this, so it needs an index.
+  "CREATE INDEX concept_deleted IF NOT EXISTS FOR (c:Concept) ON (c.deletedAt)",
+  "CREATE INDEX ingest_key IF NOT EXISTS FOR (i:Ingest) ON (i.idempotencyKey)",
   "CREATE INDEX inbox_processed IF NOT EXISTS FOR (b:Inbox) ON (b.processed)",
 
   // Search. Full-text wins on exact jargon, the vector index wins on "that

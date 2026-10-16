@@ -57,6 +57,8 @@ services:
       # actually changes behaviour. Debian ships tzdata, so unlike that one
       # there is no extra package to install.
       - TZ=${TZ:-Asia/Kolkata}
+      # Used to build the /ingest/<batchId> deep links `remember` hands back.
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:9999}
     env_file:
       - .env
     volumes:

@@ -131,17 +131,24 @@ export async function upsertConcept(
   // conversations, and a later one that mentions a concept without repeating
   // its aliases or body would otherwise erase what an earlier one wrote. The
   // plan's rule — merges append, they never overwrite — starts here.
+  // Identity is case-insensitive. Without this "Raft" and "raft" are two
+  // separate concepts — precisely the duplicate the dedupe handshake exists to
+  // prevent, and the first one that shows up in practice once a model is
+  // choosing the names. `name` remains the display form, first writer wins.
+  const nameLower = name.toLocaleLowerCase();
+
   const existing = await read(
-    `MATCH (c:Concept {name: $name})
+    `MATCH (c:Concept {nameLower: $nameLower})
      RETURN c.textHash AS hash, c.aliases AS aliases, c.body AS body,
-            c.prompt AS prompt`,
-    { name },
+            c.prompt AS prompt, c.revisions AS revisions`,
+    { nameLower },
   );
   const prior = existing.records[0];
 
   const priorAliases = (prior?.get("aliases") as string[] | null) ?? [];
   const priorBody = (prior?.get("body") as string | null) ?? "";
   const priorPrompt = (prior?.get("prompt") as string | null) ?? null;
+  const priorRevisions = (prior?.get("revisions") as string[] | null) ?? [];
   const currentHash = prior?.get("hash") as string | undefined;
 
   // Aliases accumulate: the same idea picking up another name is information,
@@ -157,6 +164,19 @@ export async function upsertConcept(
   const needsEmbedding = currentHash !== hash;
   const embedding = needsEmbedding ? await embed(text) : null;
 
+  // Keep the superseded body so an overwrite is recoverable. This is the only
+  // lossy operation in the write path, and `update_concept` uses it to let
+  // Claude rewrite an accreted note without that being a one-way door.
+  //
+  // Stored as JSON strings because a Neo4j property cannot hold a list of
+  // maps — only primitives and arrays of primitives. A :Revision label would
+  // be tidier in graph terms but would also have to be taught to the exporter,
+  // and the history of a note is not something to traverse.
+  const revisions =
+    priorBody && body !== priorBody
+      ? [JSON.stringify({ at: new Date().toISOString(), body: priorBody }), ...priorRevisions].slice(0, 5)
+      : priorRevisions;
+
   // Distinguishes "this call created it" from "a previous, possibly crashed,
   // call left a marker behind" — a plain boolean flag could go stale.
   const nonce = randomUUID();
@@ -164,9 +184,10 @@ export async function upsertConcept(
   const run = () =>
     write(
       `
-      MERGE (c:Concept {name: $name})
+      MERGE (c:Concept {nameLower: $nameLower})
       ON CREATE SET
         c.id        = randomUUID(),
+        c.name      = $name,
         c.createdAt = datetime(),
         c.tracked   = false,
         c.flagged   = false,
@@ -178,6 +199,7 @@ export async function upsertConcept(
         c.aliases   = $aliases,
         c.body      = $body,
         c.prompt    = $prompt,
+        c.revisions = $revisions,
         c.updatedAt = datetime(),
         c.ingestId  = coalesce($ingestId, c.ingestId)
       // A null embedding means "unchanged, leave it alone". Plain SET would
@@ -206,9 +228,11 @@ export async function upsertConcept(
       `,
       {
         name,
+        nameLower,
         aliases,
         body,
         prompt,
+        revisions,
         nonce,
         topics: input.topics ?? [],
         tracked: input.tracked ?? null,
@@ -312,16 +336,33 @@ export async function reinforceEdge(
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
-export async function getConcept(idOrName: string): Promise<Concept | null> {
+/**
+ * `ALIVE` is the soft-delete predicate, written once and reused by every read.
+ *
+ * Deleting is a tombstone, not a removal: the node and its edges survive so an
+ * accidental or injected delete is recoverable and undeleting restores the
+ * connections too. The cost is that EVERY read path has to exclude them, and a
+ * single forgotten predicate silently resurrects deleted concepts into search.
+ * Hence one constant, and a check asserting a deleted concept is absent from
+ * all six read paths.
+ */
+const ALIVE = "c.deletedAt IS NULL";
+
+export async function getConcept(
+  idOrName: string,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {},
+): Promise<Concept | null> {
   const result = await read(
     `
     MATCH (c:Concept)
-    WHERE c.id = $key OR c.name = $key OR $key IN c.aliases
+    WHERE (c.id = $key OR c.nameLower = $keyLower OR $key IN c.aliases
+           OR $keyLower IN [a IN coalesce(c.aliases, []) | toLower(a)])
+      AND (${includeDeleted ? "true" : ALIVE})
     OPTIONAL MATCH (c)-[:PART_OF]->(t:Topic)
     RETURN c AS concept, collect(DISTINCT t.name) AS topics
     LIMIT 1
     `,
-    { key: idOrName },
+    { key: idOrName, keyLower: idOrName.toLocaleLowerCase() },
   );
   const rec = result.records[0];
   if (!rec) return null;
@@ -362,7 +403,7 @@ export async function getNeighbourhood(
     `
     MATCH (c:Concept {id: $id})
     MATCH (c)-[*1..${d}]-(m:Concept)
-    WHERE m.id <> $id
+    WHERE m.id <> $id AND m.deletedAt IS NULL
     WITH DISTINCT m
     OPTIONAL MATCH (m)-[:PART_OF]->(t:Topic)
     RETURN m AS concept, collect(DISTINCT t.name) AS topics
@@ -384,6 +425,7 @@ export async function getNeighbourhood(
     `
     MATCH (a:Concept)-[r]->(b:Concept)
     WHERE a.id IN $ids AND b.id IN $ids
+      AND a.deletedAt IS NULL AND b.deletedAt IS NULL
     RETURN a.id AS from, b.id AS to, type(r) AS type,
            coalesce(r.traversals, 0) AS traversals,
            r.reinforcedAt AS reinforcedAt
@@ -447,6 +489,7 @@ export async function hybridSearch(
     ? read(
         `
         CALL db.index.fulltext.queryNodes('concept_text', $q) YIELD node, score
+        WHERE node.deletedAt IS NULL
         RETURN node.id AS id, node.name AS name, node.body AS body
         LIMIT $k
         `,
@@ -458,6 +501,7 @@ export async function hybridSearch(
     read(
       `
       CALL db.index.vector.queryNodes('concept_vec', $k, $vec) YIELD node, score
+      WHERE node.deletedAt IS NULL
       RETURN node.id AS id, node.name AS name, node.body AS body
       `,
       { k: int(sourceK), vec },
@@ -523,7 +567,7 @@ export async function findSimilar(
   const result = await read(
     `
     CALL db.index.vector.queryNodes('concept_vec', $k, $vec) YIELD node, score
-    WHERE NOT node.id IN $exclude
+    WHERE NOT node.id IN $exclude AND node.deletedAt IS NULL
     RETURN node.id AS id, node.name AS name, node.body AS body, score
     ORDER BY score DESC
     LIMIT $limit
@@ -558,29 +602,39 @@ export interface GraphStats {
   untracked: number;
   flagged: number;
   unembedded: number;
+  /** Tombstoned, excluded from every other count here. */
+  deleted: number;
 }
 
 export async function graphStats(): Promise<GraphStats> {
+  // The sixth read path, and the easiest one to forget: without the
+  // deletedAt filters every number here drifts upward over time and the
+  // orphan count in particular becomes meaningless.
   const result = await read(`
-    MATCH (c:Concept)
+    MATCH (c:Concept) WHERE c.deletedAt IS NULL
     WITH count(c) AS concepts,
          count(CASE WHEN NOT coalesce(c.tracked, false) THEN 1 END) AS untracked,
          count(CASE WHEN coalesce(c.flagged, false)     THEN 1 END) AS flagged,
          count(CASE WHEN c.embedding IS NULL            THEN 1 END) AS unembedded
     CALL () {
-      MATCH (o:Concept)
-      WHERE count{ (o)-[]-(:Concept) } <= 1
+      MATCH (o:Concept) WHERE o.deletedAt IS NULL
+        AND count{ (o)-[]-(n:Concept) WHERE n.deletedAt IS NULL } <= 1
       RETURN count(o) AS orphans
     }
     CALL () {
-      MATCH (:Concept)-[r]->(:Concept)
+      MATCH (a:Concept)-[r]->(b:Concept)
+      WHERE a.deletedAt IS NULL AND b.deletedAt IS NULL
       RETURN count(r) AS edges
     }
     CALL () {
       MATCH (t:Topic)
       RETURN count(t) AS topics
     }
-    RETURN concepts, untracked, flagged, unembedded, orphans, edges, topics
+    CALL () {
+      MATCH (d:Concept) WHERE d.deletedAt IS NOT NULL
+      RETURN count(d) AS deleted
+    }
+    RETURN concepts, untracked, flagged, unembedded, orphans, edges, topics, deleted
   `);
 
   const r = result.records[0];
@@ -592,5 +646,65 @@ export async function graphStats(): Promise<GraphStats> {
     untracked: num(r.get("untracked")),
     flagged: num(r.get("flagged")),
     unembedded: num(r.get("unembedded")),
+    deleted: num(r.get("deleted")),
   };
+}
+
+/**
+ * Tombstone a concept. Reversible, and the edges survive.
+ *
+ * Deliberately single-id with no delete-by-query counterpart: this is the most
+ * dangerous thing an injected instruction in a concept body could reach, so
+ * the blast radius of one successful injection is capped at one concept per
+ * tool call, each visible in the transcript.
+ */
+export async function softDeleteConcept(
+  id: string,
+): Promise<{ deleted: boolean; name?: string }> {
+  const result = await write(
+    `
+    MATCH (c:Concept {id: $id})
+    WHERE c.deletedAt IS NULL
+    SET c.deletedAt = datetime()
+    RETURN c.name AS name
+    `,
+    { id },
+  );
+  const rec = result.records[0];
+  return rec ? { deleted: true, name: String(rec.get("name")) } : { deleted: false };
+}
+
+/** Undo a tombstone. Edges were never removed, so they come back with it. */
+export async function restoreConcept(
+  id: string,
+): Promise<{ restored: boolean; name?: string }> {
+  const result = await write(
+    `
+    MATCH (c:Concept {id: $id})
+    WHERE c.deletedAt IS NOT NULL
+    REMOVE c.deletedAt
+    RETURN c.name AS name
+    `,
+    { id },
+  );
+  const rec = result.records[0];
+  return rec ? { restored: true, name: String(rec.get("name")) } : { restored: false };
+}
+
+/** Previous bodies, newest first. Written by upsertConcept on every change. */
+export async function getRevisions(
+  id: string,
+): Promise<Array<{ at: string; body: string }>> {
+  const result = await read(
+    "MATCH (c:Concept {id: $id}) RETURN coalesce(c.revisions, []) AS revisions",
+    { id },
+  );
+  const raw = (result.records[0]?.get("revisions") as string[] | undefined) ?? [];
+  return raw.flatMap((entry) => {
+    try {
+      return [JSON.parse(entry) as { at: string; body: string }];
+    } catch {
+      return [];
+    }
+  });
 }

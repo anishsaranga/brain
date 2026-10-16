@@ -1,0 +1,43 @@
+import { auth } from "@/lib/auth";
+import { NextResponse } from "next/server";
+
+/**
+ * Gate the web surface.
+ *
+ * Two paths are deliberately NOT gated, and both matter:
+ *
+ * - `/mcp/*` has its own auth (an unguessable path segment plus a Cloudflare
+ *   WAF rule limiting it to Anthropic's egress range). Sending a connector a
+ *   307 to an HTML login page would break it in a way that looks like a
+ *   network fault rather than an auth problem.
+ * - `/api/health` is called by the compose healthcheck from inside the
+ *   container, where there is no session. It answers unauthenticated callers
+ *   with a deliberately thin body — see that route for what it withholds.
+ */
+export default auth((req) => {
+  if (req.auth) return NextResponse.next();
+
+  const { pathname, search, origin } = req.nextUrl;
+
+  // Answer fetch callers with JSON. Without this they would follow the 307 to
+  // the login page and then fail parsing HTML as JSON, which is a confusing
+  // way to discover your session expired.
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const loginUrl = new URL("/login", origin);
+  loginUrl.searchParams.set("callbackUrl", `${pathname}${search}`);
+  return NextResponse.redirect(loginUrl);
+});
+
+export const config = {
+  // Everything except: the auth API itself, the login page, the MCP endpoint,
+  // the health check, Next internals, and files with an extension.
+  // The leading "/" with `$` ensures the root itself is gated — a bare
+  // `/((?!…).*)` can skip it.
+  matcher: [
+    "/",
+    "/((?!api/auth|api/health|mcp|login|_next/static|_next/image|favicon.ico|.*\.).*)",
+  ],
+};

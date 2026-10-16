@@ -108,3 +108,26 @@ rather than its filename.
 ## Licence
 
 Personal project; no licence granted.
+
+## Security posture
+
+This is write access to a knowledge base, driven by a language model, over a
+public endpoint — and content ingested today is read back into other
+conversations weeks later. That is indirect prompt injection by construction,
+so the defences are structural rather than instructional:
+
+- **Nothing reachable over MCP is irreversible.** Batched writes can be undone,
+  overwritten bodies keep their previous revisions, and delete is a tombstone.
+  Hard removal is a human action in the UI.
+- **Delete takes one id.** No bulk form and no delete-by-query, so a successful
+  injection costs one concept per call and every call is in the transcript.
+- **Per-call caps** on concepts, links and body size, rejected rather than
+  silently truncated.
+- **`cypher_read` is allowlisted, not denylisted**, because a Neo4j read
+  transaction refuses writes but still permits `CALL dbms.listConfig()`,
+  `SHOW USERS` and `SHOW TRANSACTIONS`. The database is not the boundary there,
+  so the guard is.
+- **Stored content is returned inside an untrusted-data envelope**, and errors
+  are sanitised so the endpoint secret cannot leak through one.
+
+The checks assert the refusals, not just the happy paths.
