@@ -1,5 +1,12 @@
 # Deploying `brain` on the homelab
 
+> **Placeholders.** `<HOSTNAME>`, `<TUNNEL_ID>`, `<ZONE>`, `<TAILSCALE_IP>`,
+> `<HOST>` and `<ONEDRIVE_BACKUP_DIR>` are filled in by `DEPLOY.local.md`, which
+> is gitignored. This repo is public, and the real values map a specific
+> machine — the tunnel id in particular is shared by every service on that box,
+> not just this one. Nothing in them is a credential; they are simply nobody
+> else's business.
+
 A knowledge graph fed from Claude conversations over MCP, with a graph explorer
 and an FSRS review session on top. Same pattern as the other services on
 `<HOST>` — see `C:\SERVER_REPOS\SERVICES-RUNBOOK.md` for the
@@ -253,7 +260,7 @@ confusing failure rather than a useful recovery.
 ### Where backups go
 
 - `./backups` locally — dated `brain-YYYY-MM-DD.json`, `.md.d/` and `.dump`.
-- **Text exports also mirror to `C:\Users\anish\OneDrive\brain-backups`**, so
+- **Text exports also mirror to `<ONEDRIVE_BACKUP_DIR>`**, so
   they leave this disk with no extra tooling and get OneDrive's own version
   history. Dumps stay local: large, binary, and only readable by this exact
   Neo4j version. Set `BACKUP_MIRROR_DIR=""` to turn the mirror off.
