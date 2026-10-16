@@ -61,6 +61,9 @@ services:
       - .env
     volumes:
       - brain-data:/app/data
+      # Read-only: /api/health reports how old the newest export is, so a
+      # backup that quietly stopped running is visible rather than assumed.
+      - ./backups:/backups:ro
     depends_on:
       brain-neo4j:
         condition: service_healthy

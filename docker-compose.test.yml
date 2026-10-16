@@ -68,6 +68,29 @@ services:
       - -c
       - "npm ci --no-audit --no-fund && node --import ./scripts/alias-hook.mjs scripts/graph-check.mjs"
 
+  # Same runner as brain-check, pointed at the round-trip restore test.
+  brain-backup-check:
+    image: node:24-bookworm-slim
+    container_name: brain-backup-check
+    working_dir: /app
+    volumes:
+      - .:/app
+      - brain-check-modules:/app/node_modules
+      - brain-check-models:/app/.models
+    environment:
+      - NEO4J_URI=bolt://brain-neo4j-test:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=testpassword
+      - MODEL_DIR=/app/.models
+      - ALLOW_REMOTE_MODELS=1
+    depends_on:
+      brain-neo4j-test:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - "npm ci --no-audit --no-fund && node --import ./scripts/alias-hook.mjs scripts/backup-check.mjs"
+
 volumes:
   brain-check-modules:
   brain-check-models:

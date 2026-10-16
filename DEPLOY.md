@@ -226,23 +226,130 @@ Ordered by how often each turns out to be the answer.
 The graph is **the only irreplaceable thing on this box**. Every other service
 here is reconstructible from a repo; this one *is* the asset.
 
-A constraint that shapes the strategy: `neo4j-admin database dump` **requires
-the database to be offline**, and online backup (`neo4j-admin database backup`)
-is Enterprise-only. On Community, a dump means stopping the database. Hence:
+A constraint that shapes everything: `neo4j-admin database dump` **requires the
+database to be offline** — it says so in its own help text — and online backup
+(`neo4j-admin database backup`) is Enterprise-only. On Community every dump
+costs downtime, which inverts the usual ordering and makes the portable text
+export the primary rather than the fallback.
 
-- **Primary — nightly JSON export** (`scripts/export-json.mjs`): all nodes and
-  edges to a dated file in `./backups`. Runs online, version-independent,
-  human-readable, and restorable into any graph DB including a future non-Neo4j
-  one. For an irreplaceable asset, format independence beats restore speed.
-- **Secondary — weekly `neo4j-admin database dump`** (`scripts/dump.ps1`) with a
-  brief stop/start, for a fast whole-DB restore.
-- **Tertiary — markdown export**: one file per concept, so there is always a
-  plain-text copy of prose you wrote, and an Obsidian-shaped exit.
-- **Backups currently land on the same disk** (`./backups`, bind-mounted into
-  the Neo4j container). Better than nothing, worse than off-box — stated plainly
-  rather than implied otherwise.
-- **Restore must be rehearsed at least once.** An untested backup is not a
-  backup.
+| Tier | What | When | Downtime |
+|---|---|---|---|
+| 1 | JSON export (`npm run export:json`) | nightly | none |
+| 2 | markdown export (`npm run export:md`) | nightly | none |
+| 3 | `neo4j-admin` dump (`scripts/dump.ps1`) | monthly | ~30 s |
+
+Tier 1 is the one that matters. It is version-independent, human-readable, and
+restorable into any graph store including a future non-Neo4j one. Tier 3 is
+byte-exact and faster to restore but only this Neo4j version can read it.
+
+**Embeddings are excluded** from the export. They are derived data — a restore
+recomputes them locally in seconds — and including them roughly quintuples the
+file. `--with-embeddings` exists for a byte-fidelity copy.
+
+Only the `neo4j` database is dumped, not `system`: on Community `system` holds
+little beyond the single user's password, and restoring a stale one is a
+confusing failure rather than a useful recovery.
+
+### Where backups go
+
+- `./backups` locally — dated `brain-YYYY-MM-DD.json`, `.md.d/` and `.dump`.
+- **Text exports also mirror to `C:\Users\anish\OneDrive\brain-backups`**, so
+  they leave this disk with no extra tooling and get OneDrive's own version
+  history. Dumps stay local: large, binary, and only readable by this exact
+  Neo4j version. Set `BACKUP_MIRROR_DIR=""` to turn the mirror off.
+- Rotation keeps **14 daily + 12 monthly** text exports and **3** dumps.
+  Pruning only ever deletes files matching the scripts' own naming pattern — a
+  pruner that can delete something it did not write is its own disaster.
+
+### Restore
+
+```bash
+npm run import:json -- backups/brain-2026-10-16.json          # merge
+npm run import:json -- backups/brain-2026-10-16.json --wipe   # replace (prompts)
+```
+
+Idempotent — running it twice leaves the same graph. Properties are written
+**verbatim**, which is the whole reason `src/lib/restore.ts` exists rather than
+reusing `upsertConcept`: that mints a fresh id and resets the FSRS fields
+`ON CREATE`, so restoring through it would appear to succeed while assigning
+new ids (breaking every edge) and wiping every review schedule.
+
+To restore a tier-3 dump instead, stop the container and
+`neo4j-admin database load neo4j --from-path=/backups --overwrite-destination`.
+
+### The restore is rehearsed on every check run
+
+```bash
+docker compose -f docker-compose.test.yml up -d
+npm run backup:check
+```
+
+23 checks that build a fixture graph covering every label and relationship
+type, export it, **delete everything**, import, and assert the result is
+identical — ids, FSRS state, datetimes-as-datetimes, unicode bodies, edge
+properties, and embeddings regenerated so semantic search still works. "An
+untested backup is not a backup", made continuous rather than a one-off
+rehearsal nobody repeats.
+
+It also asserts the two refusals that keep a backup honest: an **unknown node
+label** and a **multi-label node** both fail the export loudly rather than
+being silently omitted. When a later milestone adds a label, the backup stops
+working until someone teaches it about the new data — a ten-second fix, versus
+discovering six months of missing nodes at the moment you need them.
+
+### Knowing it still works
+
+`/api/health` reports backup freshness:
+
+```json
+"backup": { "lastExport": "brain-2026-10-16.json", "ageHours": 0,
+            "stale": false, "count": 1, "lastRun": { "ok": true, "at": "…" } }
+```
+
+`stale` goes true past 48 hours. Age comes from the file's **mtime**, not its
+name — a file named for today that was written a week ago is exactly the case
+worth catching. Each script also writes `last-run-*.json`, so a run that
+*failed* is distinguishable from one that never happened.
+
+A stale backup does **not** make `/api/health` return 503. It is something to
+act on, not a reason for Docker to start restarting a working service.
+
+### Scheduling
+
+```powershell
+powershell -File scripts/register-backup-tasks.ps1
+```
+
+Registers `\brain\brain-export-json` (nightly 04:00) and `\brain\brain-dump`
+(every 4 weeks, Sunday 04:30), both as the current user, no elevation. Remove
+with `-Unregister`; change times with `-NightlyAt` / `-MonthlyAt`.
+
+They run **only when logged on**, which is an acknowledgement rather than a
+limitation: Docker Desktop here is a GUI app that only starts on an interactive
+login, so a task firing at the lock screen would find no engine anyway. The
+scripts detect that case and log it in one clear line instead of a stack trace,
+and the staleness indicator surfaces a run of missed nights.
+
+### Known behaviour during a dump
+
+Stopping Neo4j fails `brain-web`'s healthcheck, so it goes **unhealthy for
+~20 seconds** during every monthly dump and then recovers on its own once the
+driver reconnects. `scripts/dump.ps1` waits for *both* containers to return to
+healthy before reporting success — a monthly task that declared victory while
+the user-facing tier was still down would hide a real outage on the one night
+nobody is watching.
+
+The stop/dump/restart is wrapped so the restart happens **unconditionally**: a
+failed dump is recoverable, a knowledge base left offline because a script
+threw is not. Both paths are exercised — the failure case writes a run record
+and exits 1.
+
+### Other traps
+
+- `docker compose down -v` destroys the volume — same trap `learn` and
+  `bathroom-status` document. Plain `down` is safe.
+- Backups land on the same disk as the data; the OneDrive mirror is what covers
+  losing the drive. Dumps are not mirrored.
 
 *(The backup scripts land in milestone 3. Until then there is nothing
 irreplaceable in the volume.)*
@@ -259,10 +366,14 @@ hybrid search fusing full-text and vector results by weighted reciprocal rank.
 29 checks passing. No user-facing surface yet — `src/lib/graph.ts` is what the
 MCP tools, the explorer and the review session will all sit on.
 
-Remaining: backups (milestone 3 — **nothing irreplaceable is in the volume
-until real ingests start, so this is the next thing that matters**), the nine
-MCP tools, explorer, review session, then OAuth DCR.
+**Milestone 3 — backups.** Done. Three tiers (nightly JSON + markdown,
+monthly dump), mirrored off-box to OneDrive, with the restore rehearsed by 23
+round-trip checks on every run and freshness reported by /api/health. The one
+remaining manual step is registering the scheduled tasks.
 
-Still **not** publicly exposed. The five deferred steps above — WAF rule, DNS,
-tunnel ingress, the claude.ai connector, and the runbook row — are all
-outstanding by choice.
+Remaining: the nine MCP tools, explorer, review session, then OAuth DCR.
+
+Still **not** publicly exposed. Six things remain yours to do, all by choice:
+the WAF rule, DNS, tunnel ingress, the claude.ai connector, the runbook row,
+and `scripts/register-backup-tasks.ps1`. Until that last one runs, the backup
+scripts work but nothing calls them on a schedule.
