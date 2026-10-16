@@ -3,6 +3,7 @@ import { getDriver } from "@/lib/neo4j";
 import { describeSchema } from "@/lib/schema";
 import { backupStatus } from "@/lib/backup-status";
 import { auth } from "@/lib/auth";
+import { mcpAuthStatus } from "@/lib/mcp-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,11 @@ export const dynamic = "force-dynamic";
  *
  * Backup staleness does NOT affect the status code either way: it is something
  * to act on, not a reason for Docker to start restarting a working service.
+ *
+ * The authenticated body also reports the MCP auth posture and the last auth
+ * attempt. That is what makes rolling out the bearer token verifiable: call
+ * ping from the connector, load this, and see whether the header arrived and
+ * matched — rather than inferring it from a 404.
  */
 export async function GET() {
   const started = Date.now();
@@ -38,6 +44,7 @@ export async function GET() {
       ok: true,
       neo4j: { address: info.address, protocol: info.protocolVersion },
       schema: { constraints: constraints.length, indexes: indexes.length },
+      mcpAuth: mcpAuthStatus(),
       backup,
       ms: Date.now() - started,
     });

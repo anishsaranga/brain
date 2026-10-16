@@ -184,7 +184,7 @@ export async function dueForReview(
   let cappedBy: DueQueue["cappedBy"] = null;
   if (remainingReviews === 0 && totalDue > 0) cappedBy = "reviews";
 
-  let cards: DueCard[] = [];
+  const cards: DueCard[] = [];
   if (take > 0) {
     const result = await read(
       `

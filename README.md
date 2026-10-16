@@ -76,15 +76,19 @@ Cloudflare Tunnel and adding it to Claude as a connector.
 ## Checks
 
 ```bash
+npm run auth:check       # the MCP auth decision — no containers needed
+
 docker compose -f docker-compose.test.yml up -d
 npm run graph:check      # graph core: upsert, links, neighbourhoods, search
 npm run backup:check     # export → wipe → import → assert identical
+npm run tools:check      # tool behaviour, caps, and the security refusals
 docker compose -f docker-compose.test.yml down
 ```
 
-They run in Linux against a **throwaway** Neo4j on 7688, never the real one —
-the scripts hold an allowlist of permitted targets and refuse anything else,
-because the first thing `backup:check` does is delete every node it can reach.
+The three that need a database run in Linux against a **throwaway** Neo4j on
+7688, never the real one — the scripts hold an allowlist of permitted targets
+and refuse anything else, because the first thing `backup:check` does is
+delete every node it can reach.
 
 ## Backups
 
@@ -128,6 +132,11 @@ so the defences are structural rather than instructional:
   `SHOW USERS` and `SHOW TRANSACTIONS`. The database is not the boundary there,
   so the guard is.
 - **Stored content is returned inside an untrusted-data envelope**, and errors
-  are sanitised so the endpoint secret cannot leak through one.
+  are sanitised so neither endpoint credential can leak through one.
+- **The MCP credential is a header, not a URL.** A bearer token on
+  `Authorization` or `X-Brain-Token`, with the unguessable path segment kept
+  underneath it as a second factor and a Cloudflare WAF rule outside both.
+  Every refusal is the same bare 404, whatever the reason, so a prober cannot
+  learn that the endpoint exists — let alone which half they got wrong.
 
 The checks assert the refusals, not just the happy paths.

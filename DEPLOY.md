@@ -42,7 +42,8 @@ that stage-2 connector auth will need.
 cd C:\SERVER_REPOS\brain
 Copy-Item .env.example .env
 # Fill in NEO4J_PASSWORD   (openssl rand -hex 20)
-#     and MCP_PATH_SECRET  (openssl rand -hex 24)
+#         MCP_PATH_SECRET  (openssl rand -hex 24)
+#     and MCP_BEARER_TOKEN (openssl rand -hex 32)
 ```
 
 **`NEO4J_AUTH` only applies on the first boot of an empty data volume.** Editing
@@ -196,6 +197,49 @@ https://<HOSTNAME>/mcp/<MCP_PATH_SECRET>
 Auth type is `none` (authless), which Anthropic supports by default for custom
 connectors. Then, in any conversation, call `ping` to confirm.
 
+### The bearer token
+
+The path secret alone works, but a secret in a URL ends up in request logs,
+browser history and any screenshot of this dialog. The same credential in a
+header does not, so `MCP_BEARER_TOKEN` is the real one and the path segment
+stays underneath it as a second factor.
+
+In the same dialog, under **Request headers**, add either:
+
+```
+Authorization: Bearer <MCP_BEARER_TOKEN>
+X-Brain-Token: <MCP_BEARER_TOKEN>
+```
+
+The server accepts both names. That is deliberate: "Request headers" is a
+limited beta, and whether the platform passes a custom `Authorization` through
+or reserves that name for its own OAuth flow cannot be determined from the
+server side. If one turns out to be stripped, switch to the other here — no
+redeploy.
+
+**Roll it out in two steps, because getting this wrong produces a 404 that is
+indistinguishable from a broken tunnel:**
+
+1. **Permissive.** Set `MCP_BEARER_TOKEN` in `.env`, leave
+   `MCP_REQUIRE_TOKEN` unset, recreate `brain-web`. The token is now compared
+   and reported but not required, so nothing you mistype in the dialog can
+   break anything.
+2. Add the header, call `ping`, then load `https://<HOSTNAME>/api/health`
+   **while logged in** and read `mcpAuth.lastAttempt`:
+
+   ```json
+   { "sawAuthorizationHeader": true, "sawCustomHeader": false,
+     "tokenPresented": true, "tokenMatched": true, "outcome": "ok (token)" }
+   ```
+
+   `sawAuthorizationHeader: false` means the platform did not pass it — switch
+   the connector to `X-Brain-Token` and repeat. `tokenMatched: false` with
+   `tokenPresented: true` is a copy-paste error in the value.
+3. **Enforcing.** Only once step 2 is green: set `MCP_REQUIRE_TOKEN=1`,
+   recreate, and `ping` once more. A request without a valid token is now a
+   404 — same as every other refusal, because a distinguishable response would
+   confirm that something lives under `/mcp`.
+
 ### Also add it to Claude Code on this box
 
 Fastest dev loop — no tunnel, no WAF in the way:
@@ -227,6 +271,13 @@ Ordered by how often each turns out to be the answer.
    looks identical to the server being down.
 5. **`Get-Service Cloudflared`** and its logs. If local checks pass and public
    ones fail, the problem is the tunnel, not the containers.
+6. **A 404 that is really the token.** Once `MCP_REQUIRE_TOKEN=1`, a missing,
+   stripped or mistyped header looks exactly like a wrong path secret, by
+   design. Do not guess — load `/api/health` authenticated and read
+   `mcpAuth`. It gives the mode, whether a token is configured at all, and
+   which headers the last request actually carried. `mode: "enforcing"` with
+   `tokenConfigured: false` means `MCP_REQUIRE_TOKEN` is set but
+   `MCP_BEARER_TOKEN` is not: it fails closed, so everything 404s.
 
 ## Data and backups
 
@@ -385,13 +436,13 @@ checks covering the security refusals as well as the behaviour.
 Remaining: the explorer (milestone 5), the review session (6), hygiene
 surfaces (7), then OAuth DCR.
 
-Still **not** publicly exposed. Six things remain yours to do, all by choice:
-the WAF rule, DNS, tunnel ingress, the claude.ai connector, the runbook row,
-and `scripts/register-backup-tasks.ps1`. Until that last one runs, the backup
-scripts work but nothing calls them on a schedule.
+Publicly exposed and live: the WAF rule, DNS, tunnel ingress, the claude.ai
+connector, the runbook row and the backup scheduled tasks are all in place, and
+`ping` from claude.ai has returned real data end to end. `DEPLOY.local.md`
+(gitignored) has the real values for each.
 
-The web app now has an auth gate, so exposure is no longer waiting on one being
-built. `DEPLOY.local.md` (gitignored) has the real values for each step.
+What remains on the auth side is finishing the bearer-token rollout — see
+"The bearer token" above — and then OAuth DCR.
 
 ## The MCP tool surface
 
@@ -469,8 +520,11 @@ case was inconclusive when probed, and it would be an SSRF primitive.
 Auth.js v5, single admin from `.env` (`ADMIN_USERNAME` plus `ADMIN_PASSWORD`
 or a bcrypt `ADMIN_PASSWORD_HASH`). `middleware.ts` gates everything except:
 
-- **`/mcp/*`** — it has its own auth, and sending a connector an HTML login
-  redirect would fail in a way that looks like a network fault.
+- **`/mcp/*`** — it has its own auth (a bearer token in a header, over an
+  unguessable path segment, inside the WAF rule), and sending a connector an
+  HTML login redirect would fail in a way that looks like a network fault.
+  The decision lives in `src/lib/mcp-auth.ts` rather than in the route, so it
+  can be tested without standing up HTTP: `npm run auth:check`.
 - **`/api/health`** — the compose healthcheck calls it with no session. It
   answers anonymous callers with `{ok, backupStale}` only; the Neo4j version,
   schema counts and backup filenames are a small map of the box and stay
@@ -479,9 +533,16 @@ or a bcrypt `ADMIN_PASSWORD_HASH`). `middleware.ts` gates everything except:
 ## Checks
 
 ```bash
+npm run auth:check       # 41 — the MCP auth decision; no containers needed
+
 docker compose -f docker-compose.test.yml up -d
 npm run graph:check      # 29 — graph core
 npm run backup:check     # 23 — export/restore round trip
 npm run tools:check      # 46 — tool behaviour and the security refusals
 docker compose -f docker-compose.test.yml down
 ```
+
+`auth:check` is the odd one out: the auth decision is a pure function of the
+request and the environment, so it needs neither Neo4j nor Docker and runs in
+about a second. That is most of why it lives in `src/lib/mcp-auth.ts` instead
+of in the route.

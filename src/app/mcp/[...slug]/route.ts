@@ -1,7 +1,7 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import { timingSafeEqual } from "node:crypto";
 import { getDriver, read } from "@/lib/neo4j";
+import { authenticateMcp, redactSecrets } from "@/lib/mcp-auth";
 import * as T from "@/lib/tools";
 import { REL_TYPES } from "@/lib/graph";
 import { GRADES } from "@/lib/fsrs";
@@ -17,19 +17,13 @@ export const dynamic = "force-dynamic";
  *   /mcp/<MCP_PATH_SECRET>
  *
  * mcp-handler deliberately does not inspect the pathname — it serves any route
- * it is mounted at — so the secret check happens here, before delegating.
- * This is stage-1 auth; the other half is a Cloudflare WAF rule limiting /mcp
- * to Anthropic's egress range. Stage 2 adds OAuth and keeps both.
+ * it is mounted at — so the check happens here, before delegating. The
+ * decision itself lives in @/lib/mcp-auth, which also handles the bearer
+ * token: both credentials, one place, testable without HTTP.
+ *
+ * The other half is a Cloudflare WAF rule limiting /mcp to Anthropic's egress
+ * range. Stage 2 adds OAuth and keeps all of it.
  */
-
-function secretMatches(candidate: string | undefined): boolean {
-  const expected = process.env.MCP_PATH_SECRET;
-  if (!expected || !candidate) return false;
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
 
 /**
  * Turn a thrown error into something safe and useful.
@@ -39,9 +33,7 @@ function secretMatches(candidate: string | undefined): boolean {
  * enough to decide what to do next and nothing that maps the deployment.
  */
 function safeError(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err);
-  const secret = process.env.MCP_PATH_SECRET;
-  const redacted = secret ? message.split(secret).join("<redacted>") : message;
+  const redacted = redactSecrets(err instanceof Error ? err.message : String(err));
 
   if (/ECONNREFUSED|ServiceUnavailable|Could not perform discovery/i.test(redacted)) {
     return "The knowledge graph database is not reachable right now. Nothing was written.";
@@ -413,7 +405,7 @@ const mcpHandler = createMcpHandler(
       }),
     );
   },
-  { serverInfo: { name: "brain", version: "0.4.0" } },
+  { serverInfo: { name: "brain", version: "0.4.1" } },
 );
 
 async function handle(
@@ -421,9 +413,11 @@ async function handle(
   ctx: { params: Promise<{ slug?: string[] }> },
 ): Promise<Response> {
   const { slug } = await ctx.params;
-  if (!secretMatches(slug?.[0])) {
-    // 404, not 401: an unauthenticated caller should not be able to tell that
-    // anything lives under /mcp at all.
+  if (!authenticateMcp(req, slug?.[0]).ok) {
+    // 404 for every reason, not 401 and never a reason: an unauthenticated
+    // caller should not be able to tell that anything lives under /mcp at
+    // all, and "wrong token" would confirm it. The reason is recorded for
+    // /api/health, which is behind a session.
     return new Response("Not found", { status: 404 });
   }
   return mcpHandler(req);

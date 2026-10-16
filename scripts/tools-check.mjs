@@ -31,6 +31,7 @@ process.env.MODEL_DIR = process.env.MODEL_DIR ?? "./.models";
 process.env.ALLOW_REMOTE_MODELS = process.env.ALLOW_REMOTE_MODELS ?? "1";
 process.env.PUBLIC_BASE_URL = "https://example.test";
 process.env.MCP_PATH_SECRET = "secret-value-that-must-never-leak";
+process.env.MCP_BEARER_TOKEN = "bearer-value-that-must-never-leak";
 
 const { getDriver, read, write, waitForNeo4j } = await import("@/lib/neo4j");
 const { ensureSchema } = await import("@/lib/schema");
@@ -569,8 +570,8 @@ await check("results stay under the size ceiling on a hub-shaped graph", async (
   );
 });
 
-await check("no tool result or error contains the MCP path secret", async () => {
-  const secret = process.env.MCP_PATH_SECRET;
+await check("no tool result or error contains either MCP credential", async () => {
+  const secrets = [process.env.MCP_PATH_SECRET, process.env.MCP_BEARER_TOKEN];
   const outputs = [
     T.formatToolResult(await T.searchKnowledge("Raft", 5)),
     T.formatToolResult(await T.inspect("health")),
@@ -578,7 +579,9 @@ await check("no tool result or error contains the MCP path secret", async () => 
     T.formatToolResult(await T.getConceptTool("Raft", 1)),
   ];
   for (const text of outputs) {
-    assert.ok(!text.includes(secret), "the path secret must never reach a tool result");
+    for (const secret of secrets) {
+      assert.ok(!text.includes(secret), "an MCP credential must never reach a tool result");
+    }
   }
 });
 
