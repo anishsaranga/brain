@@ -6,9 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "model:bake": "node scripts/bake-model.mjs ./.models",
+    "graph:check": "docker compose -f docker-compose.test.yml run --rm brain-check"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/server": "^2.3.1",
     "mcp-handler": "^2.3.0",
     "neo4j-driver": "^6.2.0",

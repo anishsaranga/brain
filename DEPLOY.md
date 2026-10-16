@@ -70,6 +70,58 @@ curl -s http://127.0.0.1:9999/api/health
 `/api/health` returns **503 when Neo4j is unreachable**. A web container
 answering 200 while the graph is down would be worse than one admitting it.
 
+### Resource footprint
+
+`brain` is the largest service on this box, because the embedding model runs
+in-process. Measured, not estimated:
+
+| | |
+|---|---|
+| `brain-web` image | 636 MB |
+| `brain-web` RSS (model loaded) | ~264 MB, capped at 1 GB |
+| `brain-neo4j` RSS | ~950 MB (heap 1 GB + pagecache 512 MB) |
+| Cold start to healthy | ~28 s (healthcheck `start_period` is 40 s) |
+
+`mem_limit` equals `memswap_limit`, so a leak is OOM-killed and restarted
+rather than swapping and dragging the other nine containers down — the same
+reasoning `bathroom-status` documents.
+
+Two Dockerfile details worth not undoing:
+
+- The ONNX runtime is pruned in **its own stage**. A `COPY` followed by a
+  `RUN rm` in the runner leaves the deleted files in the earlier layer: present
+  in the image, invisible in the filesystem, and paid for on every pull. Doing
+  it this way took the image from 1.48 GB to 636 MB.
+- `onnxruntime-node` and `onnxruntime-common` are copied **wholesale** rather
+  than traced. transformers.js reaches them through a runtime `require` that
+  Next's standalone tracer cannot follow, so it copies fragments — enough that
+  the container starts and then dies on first inference.
+
+## Checks
+
+```bash
+docker compose -f docker-compose.test.yml up -d
+npm run graph:check
+docker compose -f docker-compose.test.yml down
+```
+
+29 behavioural checks over the graph layer: upsert/merge semantics, the closed
+relationship vocabulary, bounded neighbourhoods, embeddings, and hybrid search.
+Exits 1 on any failure.
+
+They run **in Linux, against a throwaway Neo4j on 7688** — not on the Windows
+host and never against the production graph:
+
+- onnxruntime-node's win32 binding fails to `dlopen` on this machine (a missing
+  dependent DLL), so embeddings cannot run on the host at all. Running the
+  checks in a container also means they exercise the same binaries production
+  does.
+- Community Edition has a single database, so test isolation needs a separate
+  *server*, not a separate database.
+- The script holds an **allowlist** of permitted targets and refuses anything
+  else. Its first action is `DETACH DELETE` on every node, and the production
+  graph is the one thing here that cannot be rebuilt from a repo.
+
 ## 3. DNS — point the subdomain at the tunnel
 
 ```powershell
@@ -197,7 +249,20 @@ irreplaceable in the volume.)*
 
 ## Status
 
-Milestone 1 (walking skeleton) is complete: both containers healthy, schema
-applied, MCP `ping` answering over Streamable HTTP, and the secret-path guard
-returning 404 on a wrong segment. Remaining: graph core, backups, the nine
-tools, explorer, review session.
+**Milestone 1 — walking skeleton.** Done. Both containers healthy, schema
+applied, MCP `ping` answering over Streamable HTTP, secret-path guard returning
+404 on a wrong segment.
+
+**Milestone 2 — graph core.** Done. Local embeddings (all-MiniLM-L6-v2, 384-dim,
+baked into the image, warmed at boot in ~0.4 s), the graph read/write API, and
+hybrid search fusing full-text and vector results by weighted reciprocal rank.
+29 checks passing. No user-facing surface yet — `src/lib/graph.ts` is what the
+MCP tools, the explorer and the review session will all sit on.
+
+Remaining: backups (milestone 3 — **nothing irreplaceable is in the volume
+until real ingests start, so this is the next thing that matters**), the nine
+MCP tools, explorer, review session, then OAuth DCR.
+
+Still **not** publicly exposed. The five deferred steps above — WAF rule, DNS,
+tunnel ingress, the claude.ai connector, and the runbook row — are all
+outstanding by choice.

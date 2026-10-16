@@ -1,4 +1,4 @@
-import { write, read } from "./neo4j";
+import { write, read } from "@/lib/neo4j";
 
 /**
  * Schema setup. Every statement is `IF NOT EXISTS`, so this is safe to run on

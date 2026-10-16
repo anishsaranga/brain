@@ -76,6 +76,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    # The model in-process makes this the largest service on the box, so
+    # it gets a ceiling like bathroom-status has. memswap_limit equal to
+    # mem_limit means no swap: a leak dies cleanly and restarts instead
+    # of thrashing and dragging the other nine containers down with it.
+    mem_limit: 1g
+    memswap_limit: 1g
     restart: unless-stopped
 
 volumes:

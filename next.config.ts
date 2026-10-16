@@ -9,6 +9,16 @@ const nextConfig: NextConfig = {
   output: "standalone",
   turbopack: {},
 
+  // Both ship native addons and must be require()'d from node_modules at
+  // runtime rather than bundled — bundling breaks the addon loader.
+  serverExternalPackages: ["@huggingface/transformers", "onnxruntime-node"],
+
+  // NOTE: onnxruntime-node is deliberately NOT handled here. The tracer cannot
+  // follow the runtime `require` that transformers.js uses to reach it, and
+  // naming files individually missed its transitive dependencies. The
+  // Dockerfile copies that package and onnxruntime-common wholesale into the
+  // runner instead, then prunes the platform binaries. See the comment there.
+
   // Baseline security headers, same set as the other services on this box.
   // Served over HTTPS via the Cloudflare Tunnel.
   async headers() {

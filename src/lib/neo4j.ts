@@ -106,3 +106,15 @@ export async function waitForNeo4j(
     `Neo4j did not become reachable after ${attempts} attempts: ${String(lastError)}`,
   );
 }
+
+/**
+ * Wrap a JS number as a Neo4j 64-bit integer.
+ *
+ * The driver sends plain JS numbers as Float64, and Cypher's LIMIT/SKIP and
+ * the index procedures' `k` argument all reject a float:
+ *   "LIMIT: Invalid input. '50.0' is not a valid value."
+ * Any number destined for one of those positions has to go through here.
+ */
+export function int(value: number) {
+  return neo4j.int(Math.trunc(value));
+}

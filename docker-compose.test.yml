@@ -1,0 +1,73 @@
+# Throwaway Neo4j for `npm run graph:check`.
+#
+# `learn` gets test isolation for free by pointing SQLite at a temp directory.
+# Neo4j Community has exactly one database (multi-database is Enterprise), so
+# the equivalent here is a second SERVER: different port, no volume, disposable
+# password. Nothing it holds survives `down`.
+#
+#   docker compose -f docker-compose.test.yml up -d
+#   npm run graph:check
+#   docker compose -f docker-compose.test.yml down
+#
+# The check script refuses to run against 7687. The production graph is the one
+# thing on this box that cannot be rebuilt from a repo, so the guard is worth
+# more than the two lines it costs.
+services:
+  brain-neo4j-test:
+    image: neo4j:2026.09.0
+    container_name: brain-neo4j-test
+    ports:
+      - "127.0.0.1:7688:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/testpassword
+      - BRAIN_NEO4J_PASSWORD=testpassword
+      # Smaller than production: this one holds a handful of fixture nodes.
+      - NEO4J_server_memory_heap_max__size=512m
+      - NEO4J_server_memory_pagecache_size=256m
+    # No volumes on purpose. State lives for the lifetime of the container.
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${BRAIN_NEO4J_PASSWORD}\" 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  # The check runner.
+  #
+  # Runs in Linux, not on the Windows host, for two reasons. The honest one:
+  # onnxruntime-node's win32 binding fails to dlopen here (a missing dependent
+  # DLL), so embeddings cannot run on the host at all. The better one: this is
+  # the platform the service actually ships on, so the checks exercise the same
+  # binaries production does.
+  #
+  # node_modules is a named volume rather than the host's, because npm on
+  # Windows installs win32-only native packages and those would shadow the
+  # linux ones here.
+  brain-check:
+    image: node:24-bookworm-slim
+    container_name: brain-check
+    working_dir: /app
+    volumes:
+      - .:/app
+      - brain-check-modules:/app/node_modules
+      - brain-check-models:/app/.models
+    environment:
+      - NEO4J_URI=bolt://brain-neo4j-test:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=testpassword
+      - MODEL_DIR=/app/.models
+      # The one place remote model downloads are allowed: the check runner has
+      # no baked image layer to read from, so it populates its own cache volume
+      # on first run and reuses it afterwards.
+      - ALLOW_REMOTE_MODELS=1
+    depends_on:
+      brain-neo4j-test:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - "npm ci --no-audit --no-fund && node --import ./scripts/alias-hook.mjs scripts/graph-check.mjs"
+
+volumes:
+  brain-check-modules:
+  brain-check-models:
