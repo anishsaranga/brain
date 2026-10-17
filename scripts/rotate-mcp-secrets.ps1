@@ -38,6 +38,12 @@
 .EXAMPLE
   # Rotate only the token, leaving the URL (and the connector) alone:
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1 -TokenOnly
+
+.EXAMPLE
+  # Require the token, once /api/health has shown it arriving and matching.
+  # Rotates nothing. -Permissive is the way back if this breaks anything.
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1 -Enforce
+  docker compose up -d --build brain-web
 #>
 [CmdletBinding()]
 param(
@@ -45,7 +51,11 @@ param(
   # Print the current values instead of generating new ones.
   [switch]$Show,
   # Leave MCP_PATH_SECRET alone; the connector URL keeps working.
-  [switch]$TokenOnly
+  [switch]$TokenOnly,
+  # Require the bearer token. Rotates nothing.
+  [switch]$Enforce,
+  # Stop requiring it, the way back if enforcing breaks the connector.
+  [switch]$Permissive
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,6 +89,54 @@ if ($Show) {
   Write-Host "  Request header (either name works):"
   Write-Host "    Authorization: Bearer $(Get-EnvValue $lines 'MCP_BEARER_TOKEN')"
   Write-Host "    X-Brain-Token: $(Get-EnvValue $lines 'MCP_BEARER_TOKEN')"
+  Write-Host ""
+  exit 0
+}
+
+if ($Enforce -and $Permissive) {
+  Write-Error "Pick one of -Enforce or -Permissive."
+}
+
+# Flipping the mode is a separate job from rotating, and wants to be one
+# command in both directions: the way back matters more than the way
+# forward, because enforcing is the change that can break the connector.
+if ($Enforce -or $Permissive) {
+  if ($Enforce -and -not (Get-EnvValue $lines 'MCP_BEARER_TOKEN')) {
+    Write-Error "No MCP_BEARER_TOKEN set. Enforcing with no token configured fails closed and 404s everything. Run without -Enforce first."
+  }
+
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $backup = "$path.bak-$stamp"
+  $n = 1
+  while (Test-Path $backup) { $backup = "$path.bak-$stamp-$n"; $n++ }
+  Copy-Item $path $backup
+
+  $line = if ($Enforce) { 'MCP_REQUIRE_TOKEN=1' } else { '#MCP_REQUIRE_TOKEN=1' }
+  $seen = $false
+  $out = foreach ($l in $lines) {
+    if ($l -match '^\s*#?\s*MCP_REQUIRE_TOKEN=') { $seen = $true; $line } else { $l }
+  }
+  $out = @($out)
+  if (-not $seen) {
+    $i = [array]::FindIndex($out, [Predicate[string]] { param($l) $l -match '^MCP_BEARER_TOKEN=' })
+    if ($i -lt 0) { Remove-Item $backup; Write-Error "No MCP_BEARER_TOKEN line in $EnvFile; refusing to guess where the flag belongs." }
+    $out = @($out[0..$i]) + @($line) + @($out[($i + 1)..($out.Count - 1)])
+  }
+  [System.IO.File]::WriteAllLines($path, $out, $utf8NoBom)
+
+  $after = [System.IO.File]::ReadAllLines($path, [System.Text.Encoding]::UTF8)
+  $active = ($after | Where-Object { $_ -match '^MCP_REQUIRE_TOKEN=' }).Count
+  Write-Host "  backup          : $(Split-Path -Leaf $backup)"
+  Write-Host "  mode            : $(if ($active -gt 0) { 'ENFORCING - a valid token is now required' } else { 'permissive - token compared but not required' })"
+  foreach ($key in @('MCP_PATH_SECRET', 'MCP_BEARER_TOKEN', 'NEO4J_PASSWORD', 'AUTH_SECRET')) {
+    if ((Get-EnvValue $after $key) -ne (Get-EnvValue $lines $key)) {
+      Write-Host "  $key changed, which it should not have" -ForegroundColor Red
+      exit 1
+    }
+  }
+  Write-Host "  secrets         : unchanged"
+  Write-Host ""
+  Write-Host "  Next: docker compose up -d --build brain-web" -ForegroundColor Cyan
   Write-Host ""
   exit 0
 }

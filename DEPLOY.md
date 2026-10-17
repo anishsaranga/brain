@@ -255,10 +255,17 @@ indistinguishable from a broken tunnel:**
    `sawAuthorizationHeader: false` means the platform did not pass it — switch
    the connector to `X-Brain-Token` and repeat. `tokenMatched: false` with
    `tokenPresented: true` is a copy-paste error in the value.
-3. **Enforcing.** Only once step 2 is green: set `MCP_REQUIRE_TOKEN=1`,
-   recreate, and `ping` once more. A request without a valid token is now a
-   404 — same as every other refusal, because a distinguishable response would
-   confirm that something lives under `/mcp`.
+3. **Enforcing.** Only once step 2 is green:
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1 -Enforce
+   docker compose up -d --build brain-web
+   ```
+
+   It rotates nothing and refuses if no token is configured. A request
+   without a valid token is now a 404 — the same as every other refusal,
+   because a distinguishable response would confirm that something lives
+   under `/mcp`. `-Permissive` is the way back if anything breaks.
 
 ### Also add it to Claude Code on this box
 
