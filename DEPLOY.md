@@ -468,8 +468,9 @@ connector, the runbook row and the backup scheduled tasks are all in place, and
 `ping` from claude.ai has returned real data end to end. `DEPLOY.local.md`
 (gitignored) has the real values for each.
 
-What remains on the auth side is finishing the bearer-token rollout — see
-"The bearer token" above — and then OAuth DCR.
+The bearer-token rollout is complete: `/mcp` runs in enforcing mode behind
+`Authorization: Bearer`, over the path segment, inside the WAF rule. What
+remains on the auth side is OAuth DCR.
 
 ## The MCP tool surface
 
