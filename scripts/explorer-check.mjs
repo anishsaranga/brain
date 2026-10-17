@@ -39,6 +39,7 @@ process.env.ALLOW_REMOTE_MODELS = process.env.ALLOW_REMOTE_MODELS ?? "1";
 const { getDriver, read, write, waitForNeo4j } = await import("@/lib/neo4j");
 const { ensureSchema } = await import("@/lib/schema");
 const G = await import("@/lib/graph");
+const I = await import("@/lib/ingest");
 
 let passed = 0;
 let failed = 0;
@@ -259,6 +260,291 @@ await check("removing a link that is not there is reported, not thrown", async (
 await check("an unknown relationship type is refused", async () => {
   const ids = await fixture();
   await assert.rejects(() => G.unlinkConcepts(ids.raft, ids.paxos, "MADE_UP"));
+});
+
+// ── The maintenance surfaces, lifted out of inspect ──────────────────────────
+//
+// These four queries used to live inside `inspect` in tools.ts and were
+// reachable only over MCP. The explorer needs the same answers, so they moved
+// into graph.ts and both callers share them. What matters here is that they
+// still respect soft delete: a tombstone reappearing on a maintenance page is
+// exactly the kind of thing nobody notices.
+
+section("the maintenance lists");
+
+await check("listOrphans finds the unconnected and ignores tombstones", async () => {
+  const ids = await fixture();
+  const loose = await G.upsertConcept({ name: "Floating", body: "Links to nothing." });
+
+  const before = await G.listOrphans();
+  assert.ok(before.some((c) => c.id === loose.id), "an unlinked concept is an orphan");
+  // Paxos has exactly one link, which counts: a concept joined to one other
+  // is almost always the tail of a conversation nothing stitched in.
+  assert.ok(before.some((c) => c.id === ids.paxos), "one link still counts");
+  assert.ok(!before.some((c) => c.id === ids.raft), "Raft has three links");
+
+  await G.softDeleteConcept(loose.id);
+  const after = await G.listOrphans();
+  assert.ok(!after.some((c) => c.id === loose.id), "a tombstone must not be listed");
+});
+
+await check("listFlagged shows only live flagged concepts", async () => {
+  const ids = await fixture();
+  assert.deepEqual(await G.listFlagged(), []);
+
+  await G.setConceptFlags(ids.paxos, { flagged: true, flagNote: "Conflates two things." });
+  const flagged = await G.listFlagged();
+  assert.equal(flagged.length, 1);
+  assert.equal(flagged[0].id, ids.paxos);
+  assert.equal(flagged[0].note, "Conflates two things.");
+
+  await G.softDeleteConcept(ids.paxos);
+  assert.deepEqual(await G.listFlagged(), [], "a tombstone must not be listed");
+});
+
+await check("setConceptFlags can clear a flag again", async () => {
+  const ids = await fixture();
+  await G.setConceptFlags(ids.paxos, { flagged: true, flagNote: "wrong" });
+  await G.setConceptFlags(ids.paxos, { flagged: false, flagNote: null });
+  assert.deepEqual(await G.listFlagged(), []);
+});
+
+await check("setConceptFlags reports an unknown id rather than throwing", async () => {
+  await fixture();
+  assert.equal(await G.setConceptFlags("no-such-id", { flagged: true }), false);
+});
+
+await check("listStale covers tracked concepts only, and skips tombstones", async () => {
+  const ids = await fixture();
+  const stale = await G.listStale();
+  assert.deepEqual(stale.map((c) => c.id), [ids.raft], "only Raft is tracked");
+  assert.equal(stale[0].lastReview, null, "never reviewed");
+
+  await G.softDeleteConcept(ids.raft);
+  assert.deepEqual(await G.listStale(), []);
+});
+
+await check("listUntopiced finds concepts that the overview cannot show", async () => {
+  const ids = await fixture();
+  const loose = await G.listUntopiced();
+  const names = loose.map((c) => c.name).sort();
+  assert.deepEqual(names, ["Quorum", "Stale note"]);
+
+  await G.softDeleteConcept(ids.quorum);
+  assert.deepEqual((await G.listUntopiced()).map((c) => c.name), ["Stale note"]);
+});
+
+await check("navCounts agrees with the lists it summarises", async () => {
+  const ids = await fixture();
+  await G.setConceptFlags(ids.paxos, { flagged: true });
+  await G.softDeleteConcept(ids.stale);
+
+  const counts = await G.navCounts();
+  assert.equal(counts.flagged, (await G.listFlagged()).length);
+  assert.equal(counts.orphans, (await G.listOrphans()).length);
+  assert.equal(counts.trash, (await G.listDeleted()).length);
+  assert.equal(counts.trash, 1);
+});
+
+// ── The inbox, which had a write path and no reader ──────────────────────────
+
+section("inbox");
+
+await check("a capture round-trips to listInbox", async () => {
+  await reset();
+  const { id } = await I.capture("Read the Raft paper section 5.", "manual");
+  const inbox = await G.listInbox();
+  assert.equal(inbox.length, 1);
+  assert.equal(inbox[0].id, id);
+  assert.equal(inbox[0].text, "Read the Raft paper section 5.");
+});
+
+await check("a discarded capture leaves the inbox but is not destroyed", async () => {
+  await reset();
+  const { id } = await I.capture("Mis-captured.", "manual");
+  assert.equal((await G.listInbox()).length, 1);
+
+  const { discarded } = await I.discardCapture(id);
+  assert.equal(discarded, true);
+  assert.deepEqual(await G.listInbox(), []);
+
+  const still = await read("MATCH (b:Inbox {id: $id}) RETURN b.text AS text", { id });
+  assert.equal(still.records[0]?.get("text"), "Mis-captured.", "the text is kept");
+});
+
+await check("discarding twice is reported rather than silently succeeding", async () => {
+  await reset();
+  const { id } = await I.capture("Once.", "manual");
+  await I.discardCapture(id);
+  assert.deepEqual(await I.discardCapture(id), { discarded: false });
+});
+
+// ── Ingest batches: the 404 ──────────────────────────────────────────────────
+//
+// `remember` has returned reviewUrl pointing at /ingest/<batchId> since the
+// first ingest, and the route did not exist. These cover the reader that page
+// needs.
+
+section("ingest batches");
+
+async function ingestFixture() {
+  await reset();
+  return I.remember({
+    concepts: [
+      { name: "Vector clock", body: "Partial ordering of events.", topics: ["Distributed systems"] },
+      { name: "Lamport timestamp", body: "A scalar logical clock." },
+    ],
+    links: [{ from: "Vector clock", to: "Lamport timestamp", type: "RELATED_TO" }],
+    toolCaller: "check",
+  });
+}
+
+await check("a batch is listed and readable by its id", async () => {
+  const result = await ingestFixture();
+  assert.ok(result.batchId, "the ingest wrote something");
+
+  const listed = await G.listIngests();
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, result.batchId);
+  assert.equal(listed[0].created, 2);
+  assert.equal(listed[0].undone, false);
+
+  const batch = await G.getIngestBatch(result.batchId);
+  assert.equal(batch.created, 2);
+  assert.equal(batch.toolCaller, "check");
+  assert.deepEqual(
+    batch.createdConcepts.map((c) => c.name).sort(),
+    ["Lamport timestamp", "Vector clock"],
+  );
+  assert.equal(batch.links.length, 1);
+  assert.equal(batch.links[0].present, true, "the link it wrote is still there");
+});
+
+await check("an unknown batch id returns null rather than throwing", async () => {
+  await reset();
+  assert.equal(await G.getIngestBatch("00000000-0000-0000-0000-000000000000"), null);
+});
+
+await check("after an undo the batch still lists what it wrote, marked", async () => {
+  const result = await ingestFixture();
+  await I.undoIngest(result.batchId);
+
+  const batch = await G.getIngestBatch(result.batchId);
+  assert.equal(batch.undone, true);
+  // The concepts must still be listed. Hiding them would show an empty batch,
+  // which reads as data loss rather than a successful undo.
+  assert.equal(batch.createdConcepts.length, 2);
+  assert.ok(
+    batch.createdConcepts.every((c) => c.deleted),
+    "every created concept is now a tombstone",
+  );
+  assert.equal(batch.links[0].present, false, "the link was removed");
+});
+
+await check("a batch page survives a concept being destroyed outright", async () => {
+  const result = await ingestFixture();
+  await I.undoIngest(result.batchId);
+
+  const trashed = await G.listDeleted();
+  const victim = trashed.find((d) => d.name === "Vector clock");
+  const gone = await G.hardDeleteConcept(victim.id, "Vector clock");
+  assert.equal(gone.deleted, true);
+
+  const batch = await G.getIngestBatch(result.batchId);
+  assert.equal(batch.createdConcepts.length, 2, "the batch still records both");
+  assert.ok(
+    batch.createdConcepts.some((c) => c.name === "(destroyed)"),
+    "the destroyed one is named as such rather than crashing the page",
+  );
+});
+
+// ── Renaming, which used to fork the concept ─────────────────────────────────
+
+section("rename");
+
+await check("a rename moves the concept rather than creating a second one", async () => {
+  const ids = await fixture();
+  const { renamed } = await G.renameConcept(ids.raft, "Raft consensus");
+  assert.equal(renamed, true);
+
+  const after = await G.getConcept(ids.raft);
+  assert.equal(after.name, "Raft consensus", "same id, new name");
+
+  const all = await read(`MATCH (c:Concept) WHERE c.deletedAt IS NULL RETURN count(c) AS n`);
+  assert.equal(all.records[0].get("n").toNumber(), 4, "no duplicate was created");
+
+  // The links have to come with it, which they do only because the node
+  // itself moved rather than a new one being merged into existence.
+  const hood = await G.getNeighbourhood(ids.raft, 1);
+  assert.equal(hood.nodes.length, 3);
+});
+
+await check("a case-only rename is applied", async () => {
+  const ids = await fixture();
+  await G.renameConcept(ids.quorum, "QUORUM");
+  assert.equal((await G.getConcept(ids.quorum)).name, "QUORUM");
+});
+
+await check("a rename onto an existing name is refused with a reason", async () => {
+  const ids = await fixture();
+  const result = await G.renameConcept(ids.raft, "Paxos");
+  assert.equal(result.renamed, false);
+  assert.match(result.reason, /already exists/);
+  assert.equal((await G.getConcept(ids.raft)).name, "Raft", "unchanged");
+});
+
+await check("renaming an unknown id is refused rather than throwing", async () => {
+  await fixture();
+  const result = await G.renameConcept("no-such-id", "Anything");
+  assert.equal(result.renamed, false);
+});
+
+// ── The whole-graph view ─────────────────────────────────────────────────────
+
+section("fullGraph");
+
+await check("it returns live concepts with their degree", async () => {
+  const ids = await fixture();
+  const graph = await G.fullGraph();
+
+  assert.equal(graph.nodes.length, 4);
+  assert.equal(graph.truncated, false);
+  assert.equal(graph.total, 4);
+
+  const raft = graph.nodes.find((n) => n.id === ids.raft);
+  assert.equal(raft.degree, 3, "Raft is joined to the other three");
+  assert.equal(raft.tracked, true);
+  assert.equal(raft.topic, "Distributed systems");
+
+  assert.equal(graph.edges.length, 3);
+});
+
+await check("it excludes tombstones and the edges that touch them", async () => {
+  const ids = await fixture();
+  await G.softDeleteConcept(ids.paxos);
+
+  const graph = await G.fullGraph();
+  assert.equal(graph.nodes.length, 3);
+  assert.ok(!graph.nodes.some((n) => n.id === ids.paxos));
+  assert.equal(graph.edges.length, 2, "Raft to Paxos went with it");
+  assert.equal(graph.nodes.find((n) => n.id === ids.raft).degree, 2);
+});
+
+await check("the cap reports itself instead of lying about the size", async () => {
+  await fixture();
+  const graph = await G.fullGraph(2);
+  assert.equal(graph.nodes.length, 2);
+  assert.equal(graph.truncated, true);
+  assert.equal(graph.total, 4, "the real total is still reported");
+  // Ordered by degree, so what survives a cap is the connected core rather
+  // than an arbitrary slice.
+  assert.ok(graph.nodes[0].degree >= graph.nodes[1].degree);
+});
+
+await check("an empty graph is empty rather than an error", async () => {
+  await reset();
+  const graph = await G.fullGraph();
+  assert.deepEqual(graph, { nodes: [], edges: [], truncated: false, total: 0 });
 });
 
 // ── Teardown ─────────────────────────────────────────────────────────────────

@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import cytoscape from "cytoscape";
 import { relLabel } from "@/lib/rel-types";
+import { themeColors, watchTheme } from "@/lib/theme-colors";
+import styles from "./graph-canvas.module.css";
 
 export interface CanvasNode {
   id: string;
@@ -102,18 +104,6 @@ function layoutPositions(
   return positions;
 }
 
-/** Cytoscape cannot read CSS custom properties, so resolve them once. */
-function themeColors(el: HTMLElement) {
-  const style = getComputedStyle(el);
-  const read = (name: string, fallback: string) =>
-    style.getPropertyValue(name).trim() || fallback;
-  return {
-    fg: read("--fg", "#111418"),
-    bg: read("--bg", "#ffffff"),
-    muted: read("--muted", "#5c6672"),
-    line: read("--line", "#e3e7ec"),
-  };
-}
 
 export default function GraphCanvas({
   centerId,
@@ -133,6 +123,7 @@ export default function GraphCanvas({
     const el = container.current;
     if (!el) return;
 
+    const build = () => {
     const colors = themeColors(el);
     const width = el.clientWidth || 800;
     const positions = layoutPositions(centerId, nodes, edges, width, height);
@@ -200,8 +191,8 @@ export default function GraphCanvas({
             "z-index": 10,
           },
         },
-        { selector: "node[?tracked]", style: { "border-color": colors.fg } },
-        { selector: "node[?flagged]", style: { "background-color": "#d4453d" } },
+        { selector: "node[?tracked]", style: { "border-color": colors.accent } },
+        { selector: "node[?flagged]", style: { "background-color": colors.danger } },
         {
           selector: "edge",
           style: {
@@ -220,6 +211,20 @@ export default function GraphCanvas({
             "curve-style": "bezier",
           },
         },
+        // Hovering isolates one concept's connections. On a dense
+        // neighbourhood the edge labels overlap enough that this is the only
+        // way to read which relationship goes where.
+        { selector: ".dim", style: { opacity: 0.15, "text-opacity": 0 } },
+        {
+          selector: ".highlight",
+          style: {
+            "line-color": colors.accent,
+            "target-arrow-color": colors.accent,
+            color: colors.accent,
+            width: 1.8,
+            "z-index": 5,
+          },
+        },
       ],
       // The graph is for reading and navigating; dragging nodes would fight
       // the stable positions that make it readable.
@@ -230,48 +235,55 @@ export default function GraphCanvas({
       maxZoom: 1.4,
     });
 
-    cy.fit(cy.elements(), 30);
-    if (cy.zoom() > 1.4) {
-      cy.zoom(1.4);
-      cy.center();
-    }
-
-    const observer = new ResizeObserver(() => {
+    const refit = () => {
       cy.fit(cy.elements(), 30);
       if (cy.zoom() > 1.4) {
         cy.zoom(1.4);
         cy.center();
       }
+    };
+    refit();
+
+      cy.on("tap", "node", (event) => {
+        const id = event.target.id();
+        if (id !== centerId) router.push(`/c/${id}`);
+      });
+
+      cy.on("mouseover", "node", (event) => {
+        const node = event.target;
+        const near = node.closedNeighborhood();
+        cy.elements().difference(near).addClass("dim");
+        near.edges().addClass("highlight");
+        el.style.cursor = node.id() === centerId ? "default" : "pointer";
+      });
+
+      cy.on("mouseout", "node", () => {
+        cy.elements().removeClass("dim highlight");
+        el.style.cursor = "default";
+      });
+
+      return { cy, refit };
+    };
+
+    let { cy, refit } = build();
+
+    // Cytoscape holds a snapshot of the palette and cannot see a custom
+    // property change, so without this the graph keeps the old colours after
+    // a theme switch until something remounts it.
+    const stopWatching = watchTheme(() => {
+      cy.destroy();
+      ({ cy, refit } = build());
     });
+
+    const observer = new ResizeObserver(() => refit());
     observer.observe(el);
 
-    cy.on("tap", "node", (event) => {
-      const id = event.target.id();
-      if (id !== centerId) router.push(`/c/${id}`);
-    });
-    cy.on("mouseover", "node", () => {
-      el.style.cursor = "pointer";
-    });
-    cy.on("mouseout", "node", () => {
-      el.style.cursor = "default";
-    });
-
     return () => {
+      stopWatching();
       observer.disconnect();
       cy.destroy();
     };
   }, [centerId, nodes, edges, height, router]);
 
-  return (
-    <div
-      ref={container}
-      style={{
-        width: "100%",
-        height,
-        border: "1px solid var(--line)",
-        borderRadius: 10,
-        background: "var(--bg)",
-      }}
-    />
-  );
+  return <div ref={container} className={`${styles.canvas} fade-in`} style={{ height }} />;
 }

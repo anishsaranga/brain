@@ -1,21 +1,17 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { THEME_EVENT } from "@/lib/theme-colors";
 import styles from "./theme-toggle.module.css";
 
 type Choice = "system" | "light" | "dark";
 
 export const THEME_KEY = "brain-theme";
 
-/**
- * Fired whenever the theme changes in this tab.
- *
- * The `storage` event only reaches OTHER tabs, so something same-tab is
- * needed as well. The graph canvas listens for this too: Cytoscape resolves
- * the palette once when it mounts and cannot see a custom property change,
- * so without a nudge it keeps the old colours until it is remounted.
- */
-export const THEME_EVENT = "brain:themechange";
+// THEME_EVENT lives in lib/theme-colors so the graph canvases can listen for
+// it without importing this component. They need it because Cytoscape holds
+// a snapshot of the palette and cannot see a custom property change.
+export { THEME_EVENT };
 
 /**
  * The inline script that runs before first paint.

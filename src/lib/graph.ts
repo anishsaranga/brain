@@ -1081,6 +1081,103 @@ export async function setConceptFlags(
   return num(result.records[0]?.get("n")) > 0;
 }
 
+export interface FullGraphNode {
+  id: string;
+  name: string;
+  /** First topic alphabetically, used only to colour the node. */
+  topic: string | null;
+  degree: number;
+  tracked: boolean;
+  flagged: boolean;
+}
+
+export interface GraphLink {
+  from: string;
+  to: string;
+  type: RelType;
+}
+
+export interface FullGraph {
+  nodes: FullGraphNode[];
+  edges: GraphLink[];
+  /** True when the cap, not the graph, is why you are seeing this much. */
+  truncated: boolean;
+  total: number;
+}
+
+/**
+ * The whole graph, capped.
+ *
+ * Ordered by degree so that if the cap bites, what survives is the connected
+ * core rather than an arbitrary slice. Showing the thousand least connected
+ * concepts would be worse than showing nothing: it looks like a dust cloud
+ * and says nothing true about the shape of the graph.
+ *
+ * The cap exists because Cytoscape degrades badly past a couple of thousand
+ * nodes, and because the payload crosses the wire. `truncated` and `total`
+ * are reported so the page can say so rather than silently lying about size,
+ * the same contract `getNeighbourhood` already uses.
+ */
+export async function fullGraph(limit = 1500): Promise<FullGraph> {
+  const capped = Math.max(1, Math.min(4000, limit));
+
+  const totalResult = await read(`MATCH (c:Concept) WHERE ${ALIVE} RETURN count(c) AS n`);
+  const total = num(totalResult.records[0]?.get("n"));
+
+  const nodeResult = await read(
+    `
+    MATCH (c:Concept) WHERE ${ALIVE}
+    WITH c, count{ (c)-[]-(n:Concept) WHERE n.deletedAt IS NULL } AS degree
+    ORDER BY degree DESC, c.updatedAt DESC
+    LIMIT $limit
+    OPTIONAL MATCH (c)-[:PART_OF]->(t:Topic)
+    RETURN c.id AS id, c.name AS name, degree,
+           coalesce(c.tracked, false) AS tracked,
+           coalesce(c.flagged, false) AS flagged,
+           collect(t.name) AS topics
+    `,
+    { limit: int(capped) },
+  );
+
+  const nodes: FullGraphNode[] = nodeResult.records.map((r) => ({
+    id: String(r.get("id")),
+    name: String(r.get("name")),
+    // One topic per node, because the node gets one colour. Sorted so the
+    // same concept keeps the same colour between loads even if the database
+    // returns its topics in a different order. Sorting here rather than in
+    // Cypher avoids depending on APOC, which Community does not ship.
+    topic: [...((r.get("topics") as string[]) ?? [])].sort()[0] ?? null,
+    degree: num(r.get("degree")),
+    tracked: Boolean(r.get("tracked")),
+    flagged: Boolean(r.get("flagged")),
+  }));
+
+  // Edges only among the nodes that survived the cap. An edge pointing at a
+  // node that was cut would be dropped by the renderer anyway.
+  const ids = nodes.map((n) => n.id);
+  const edgeResult =
+    ids.length === 0
+      ? null
+      : await read(
+          `
+          MATCH (a:Concept)-[r]->(b:Concept)
+          WHERE a.id IN $ids AND b.id IN $ids
+            AND a.deletedAt IS NULL AND b.deletedAt IS NULL
+            AND type(r) IN $types
+          RETURN a.id AS from, b.id AS to, type(r) AS type
+          `,
+          { ids, types: [...REL_TYPES] },
+        );
+
+  const edges: GraphLink[] = (edgeResult?.records ?? []).map((r) => ({
+    from: String(r.get("from")),
+    to: String(r.get("to")),
+    type: String(r.get("type")) as RelType,
+  }));
+
+  return { nodes, edges, truncated: total > nodes.length, total };
+}
+
 /* ── Ingest batches ────────────────────────────────────────────────────────
  *
  * `remember` has always returned a `reviewUrl` pointing at /ingest/<id>, and
