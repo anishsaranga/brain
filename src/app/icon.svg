@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!--
+    Three nodes and the links between them: the smallest drawing that is a
+    graph rather than a pile. A favicon cannot inherit currentColor from the
+    page, so the moss accent is written out and adjusted for dark browser
+    chrome through the media query below.
+  -->
+  <style>
+    .edge { stroke: #2f6b4f; stroke-width: 2.1; stroke-linecap: round; }
+    .node { fill: #2f6b4f; }
+    .hub  { fill: #1a1a18; }
+    @media (prefers-color-scheme: dark) {
+      .edge { stroke: #6fbf95; }
+      .node { fill: #6fbf95; }
+      .hub  { fill: #ecebe6; }
+    }
+  </style>
+  <path class="edge" d="M8.5 23.5 L16 8.5 L24 20" />
+  <path class="edge" d="M8.5 23.5 L24 20" />
+  <circle class="node" cx="8.5" cy="23.5" r="3.6" />
+  <circle class="node" cx="24" cy="20" r="3.6" />
+  <circle class="hub" cx="16" cy="8.5" r="4.4" />
+</svg>

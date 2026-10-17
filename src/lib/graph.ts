@@ -920,3 +920,62 @@ export async function unlinkedNeighbours(
   const exclude = [conceptId, ...((linked.records[0]?.get("ids") as string[]) ?? [])];
   return findSimilar(vec, { excludeIds: exclude, limit, minScore: 0.5 });
 }
+
+export interface NavCounts {
+  inbox: number;
+  due: number;
+  orphans: number;
+  flagged: number;
+  trash: number;
+}
+
+/**
+ * The five numbers in the nav.
+ *
+ * One round trip, because this runs on every page render. The counts are the
+ * whole point of putting them there: an inbox you cannot see is an inbox you
+ * do not clear, and the same goes for orphans, which accumulate silently
+ * because each conversation is blind to the others.
+ *
+ * `due` repeats the predicate from `dueForReview` rather than calling it:
+ * that function also reads today's counts and applies the daily caps, which
+ * is three more queries for a number in a nav. The badge means "due", not
+ * "left in today's allowance" — tell the user the truth about their backlog
+ * and let /review explain the caps.
+ */
+export async function navCounts(): Promise<NavCounts> {
+  const result = await read(`
+    CALL () {
+      MATCH (b:Inbox) WHERE coalesce(b.processed, false) = false
+      RETURN count(b) AS inbox
+    }
+    CALL () {
+      MATCH (c:Concept)
+      WHERE ${ALIVE} AND c.tracked = true AND (c.due IS NULL OR c.due <= datetime())
+      RETURN count(c) AS due
+    }
+    CALL () {
+      MATCH (c:Concept)
+      WHERE ${ALIVE} AND count{ (c)-[]-(n:Concept) WHERE n.deletedAt IS NULL } <= 1
+      RETURN count(c) AS orphans
+    }
+    CALL () {
+      MATCH (c:Concept) WHERE ${ALIVE} AND c.flagged = true
+      RETURN count(c) AS flagged
+    }
+    CALL () {
+      MATCH (c:Concept) WHERE c.deletedAt IS NOT NULL
+      RETURN count(c) AS trash
+    }
+    RETURN inbox, due, orphans, flagged, trash
+  `);
+
+  const r = result.records[0];
+  return {
+    inbox: num(r?.get("inbox")),
+    due: num(r?.get("due")),
+    orphans: num(r?.get("orphans")),
+    flagged: num(r?.get("flagged")),
+    trash: num(r?.get("trash")),
+  };
+}

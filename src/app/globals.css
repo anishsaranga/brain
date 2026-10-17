@@ -1,22 +1,123 @@
+/*
+ * The token layer.
+ *
+ * Everything visual resolves to a custom property declared here. Components
+ * get CSS Modules that consume these; nothing hard-codes a colour.
+ *
+ * FOUR NAMES ARE LOAD-BEARING: --bg, --fg, --muted and --line are read at
+ * runtime by `graph-canvas.tsx` through getComputedStyle, because Cytoscape
+ * cannot resolve custom properties itself. Renaming any of them breaks the
+ * graph's colours silently, with no error and no failing build.
+ */
+
 :root {
+  /* ── Surfaces and ink ─────────────────────────────────────────────────── */
+  --bg: #fdfcfa;
+  --bg-raised: #fffefc;
+  --bg-sunken: #f4f2ee;
+  --fg: #1a1a18;
+  --muted: #6b6861;
+  --line: #e4e0d8;
+
+  /* One accent, doing semantic work: tracked, links, focus. Red is reserved
+     for a real state (flagged, destructive) and is never decorative. */
+  --accent: #2f6b4f;
+  --accent-ink: #ffffff;
+  --accent-wash: rgba(47, 107, 79, 0.09);
+  --danger: #b4302a;
+  --danger-wash: rgba(180, 48, 42, 0.09);
+
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  /* The three --font-* variables are supplied by next/font in layout.tsx. */
+  --serif: var(--font-serif), Georgia, "Times New Roman", serif;
+  --sans: var(--font-sans), ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
+
+  --step--1: 0.8125rem;
+  --step-0: 0.9375rem;
+  --step-1: 1.0625rem;
+  --step-2: 1.375rem;
+  --step-3: 1.75rem;
+  --step-4: 2.25rem;
+
+  /* ── Space, shape, depth ──────────────────────────────────────────────── */
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  --s7: 3rem;
+
+  /* One radius for every surface. No pills, no mixed scale. */
+  --radius: 10px;
+  --radius-sm: 6px;
+
+  --shadow: 0 1px 2px rgba(26, 26, 24, 0.04), 0 4px 16px rgba(26, 26, 24, 0.05);
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --fast: 120ms;
+  --base: 220ms;
+
+  /* Prose measure. Long notes are the thing being read here. */
+  --measure: 68ch;
+
   color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #111418;
-  --muted: #5c6672;
-  --line: #e3e7ec;
 }
 
+/*
+ * Dark is both the system preference and an explicit choice.
+ *
+ * The media query is guarded with :not([data-theme="light"]) so an explicit
+ * "light" beats a dark system, and the attribute block below it lets an
+ * explicit "dark" win on a light system. Without the guard the toggle could
+ * only ever darken.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1216;
-    --fg: #e8ecf1;
-    --muted: #8d98a6;
-    --line: #232a33;
+  :root:not([data-theme="light"]) {
+    --bg: #16161a;
+    --bg-raised: #1d1e23;
+    --bg-sunken: #101013;
+    --fg: #ecebe6;
+    --muted: #9b968c;
+    --line: #2b2c32;
+
+    --accent: #6fbf95;
+    --accent-ink: #11231a;
+    --accent-wash: rgba(111, 191, 149, 0.12);
+    --danger: #e0645c;
+    --danger-wash: rgba(224, 100, 92, 0.13);
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.35);
   }
 }
 
+:root[data-theme="dark"] {
+  --bg: #16161a;
+  --bg-raised: #1d1e23;
+  --bg-sunken: #101013;
+  --fg: #ecebe6;
+  --muted: #9b968c;
+  --line: #2b2c32;
+
+  --accent: #6fbf95;
+  --accent-ink: #11231a;
+  --accent-wash: rgba(111, 191, 149, 0.12);
+  --danger: #e0645c;
+  --danger-wash: rgba(224, 100, 92, 0.13);
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+/* ── Reset and base ───────────────────────────────────────────────────────── */
+
 * {
   box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 html,
@@ -25,5 +126,256 @@ body {
   padding: 0;
   background: var(--bg);
   color: var(--fg);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--sans);
+  font-size: var(--step-0);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--serif);
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+a:hover {
+  text-decoration-color: currentColor;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* One focus treatment everywhere, and never removed without a replacement. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: var(--accent-wash);
+}
+
+/* Numbers, ids, timestamps and relation labels are all mono. At this density
+   it is the difference between scanning and reading. */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+/* ── Rendered markdown ────────────────────────────────────────────────────── */
+/*
+ * Concept bodies are markdown and have been since the first ingest: the tool
+ * schema says so and the editor's own field label says so. Until now they
+ * rendered inside a <pre>, so every heading and list marker showed as a
+ * literal character. This is what they render into instead.
+ */
+
+.prose {
+  font-family: var(--serif);
+  font-size: var(--step-1);
+  line-height: 1.68;
+  max-width: var(--measure);
+  overflow-wrap: break-word;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose p,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose pre,
+.prose table {
+  margin: 0 0 0.9em;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  margin: 1.5em 0 0.4em;
+}
+
+.prose h1 {
+  font-size: var(--step-3);
+}
+
+.prose h2 {
+  font-size: var(--step-2);
+}
+
+.prose h3 {
+  font-size: var(--step-1);
+  font-weight: 600;
+}
+
+.prose h4 {
+  font-size: var(--step-0);
+  font-weight: 600;
+  font-family: var(--sans);
+  letter-spacing: 0.01em;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.25em;
+}
+
+.prose li {
+  margin: 0.2em 0;
+}
+
+.prose li::marker {
+  color: var(--muted);
+}
+
+.prose blockquote {
+  margin-left: 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-style: italic;
+}
+
+.prose code {
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.32em;
+}
+
+.prose pre {
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s3) var(--s4);
+  overflow-x: auto;
+  font-size: var(--step--1);
+  line-height: 1.55;
+}
+
+.prose pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--sans);
+  font-size: var(--step--1);
+}
+
+.prose th,
+.prose td {
+  text-align: left;
+  padding: 0.45em 0.7em;
+  border-bottom: 1px solid var(--line);
+}
+
+.prose th {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1.6em 0;
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+}
+
+/* remark-gfm task lists */
+.prose input[type="checkbox"] {
+  margin-right: 0.4em;
+  accent-color: var(--accent);
+}
+
+.prose li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.25em;
+}
+
+/* ── Motion ───────────────────────────────────────────────────────────────── */
+/*
+ * Opt-in rather than opt-out: the animations live inside the no-preference
+ * query, so if the query never matches nothing moves. The reduce block below
+ * is a second belt for anything a component declares on its own.
+ */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Staggered entrance. Communicates order in a list you are scanning. */
+  .stagger > * {
+    animation: rise var(--base) var(--ease) backwards;
+    animation-delay: calc(var(--i, 0) * 35ms);
+  }
+
+  .fade-in {
+    animation: fade var(--base) var(--ease) backwards;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
