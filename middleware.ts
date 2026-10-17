@@ -1,21 +1,28 @@
 import { auth } from "@/lib/auth";
+import { isEmailAllowed } from "@/lib/allowlist";
 import { NextResponse } from "next/server";
 
 /**
  * Gate the web surface.
  *
+ * A valid session is not sufficient on its own: the address is re-checked
+ * against the allowlist on every request. Sessions are JWTs with a seven-day
+ * life, so without this, removing someone from AUTH_ALLOWED_EMAILS would not
+ * take effect until their token expired. Revocation should be immediate.
+ *
  * Two paths are deliberately NOT gated, and both matter:
  *
- * - `/mcp/*` has its own auth (an unguessable path segment plus a Cloudflare
- *   WAF rule limiting it to Anthropic's egress range). Sending a connector a
- *   307 to an HTML login page would break it in a way that looks like a
- *   network fault rather than an auth problem.
+ * - `/mcp/*` has its own auth (a bearer token over an unguessable path
+ *   segment, inside a Cloudflare WAF rule). Sending a connector a 307 to an
+ *   HTML login page would break it in a way that looks like a network fault.
  * - `/api/health` is called by the compose healthcheck from inside the
  *   container, where there is no session. It answers unauthenticated callers
  *   with a deliberately thin body — see that route for what it withholds.
  */
 export default auth((req) => {
-  if (req.auth) return NextResponse.next();
+  if (req.auth && isEmailAllowed(req.auth.user?.email)) {
+    return NextResponse.next();
+  }
 
   const { pathname, search, origin } = req.nextUrl;
 

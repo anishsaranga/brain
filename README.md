@@ -76,7 +76,7 @@ Cloudflare Tunnel and adding it to Claude as a connector.
 ## Checks
 
 ```bash
-npm run auth:check       # the MCP auth decision — no containers needed
+npm run auth:check       # MCP auth + the sign-in allowlist — no containers needed
 
 docker compose -f docker-compose.test.yml up -d
 npm run graph:check      # graph core: upsert, links, neighbourhoods, search
@@ -133,6 +133,10 @@ so the defences are structural rather than instructional:
   so the guard is.
 - **Stored content is returned inside an untrusted-data envelope**, and errors
   are sanitised so neither endpoint credential can leak through one.
+- **The web UI has no password.** Google sign-in, with an allowlist that is
+  the real boundary — the provider proves identity, never authorisation. It
+  fails closed when unset, checks `email_verified` rather than trusting it,
+  and is re-checked on every request so revocation is immediate.
 - **The MCP credential is a header, not a URL.** A bearer token on
   `Authorization` or `X-Brain-Token`, with the unguessable path segment kept
   underneath it as a second factor and a Cloudflare WAF rule outside both.

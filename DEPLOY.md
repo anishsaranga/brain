@@ -551,8 +551,35 @@ case was inconclusive when probed, and it would be an SSRF primitive.
 
 ## Web UI auth
 
-Auth.js v5, single admin from `.env` (`ADMIN_USERNAME` plus `ADMIN_PASSWORD`
-or a bcrypt `ADMIN_PASSWORD_HASH`). `middleware.ts` gates everything except:
+Auth.js v5 with **Google sign-in**. There is no password anywhere in this
+app, by design: a password is a credential this service would have to store,
+rotate and get right, and Google already does identity better than a single
+bcrypt hash ever will.
+
+Google proves *who* someone is and never that they are allowed in — any
+Google account can complete the OAuth flow. `AUTH_ALLOWED_EMAILS` is
+therefore the entire security boundary for the UI, and the UI is where hard
+delete lives. The decision is in `src/lib/allowlist.ts`, deliberately free of
+any next-auth import so `npm run auth:check` can exercise it without a Next
+runtime. It **fails closed**: unset or empty admits nobody.
+
+`email_verified` is checked, not assumed. Google sets it for gmail.com, but
+a Workspace or custom-domain account can present an address its owner never
+proved control of.
+
+The allowlist is re-checked by `middleware.ts` on **every request**, not only
+at sign-in: sessions are seven-day JWTs, and removing an address should lock
+it out at once rather than when the token expires.
+
+Setup is a Google Cloud OAuth 2.0 Client ID of type "Web application" with
+these authorized redirect URIs — the path is fixed by Auth.js:
+
+```
+https://<HOSTNAME>/api/auth/callback/google
+http://localhost:9999/api/auth/callback/google
+```
+
+`middleware.ts` gates everything except:
 
 - **`/mcp/*`** — it has its own auth (a bearer token in a header, over an
   unguessable path segment, inside the WAF rule), and sending a connector an
@@ -567,7 +594,7 @@ or a bcrypt `ADMIN_PASSWORD_HASH`). `middleware.ts` gates everything except:
 ## Checks
 
 ```bash
-npm run auth:check       # 41 — the MCP auth decision; no containers needed
+npm run auth:check       # 49 — MCP auth + the sign-in allowlist; no containers
 
 docker compose -f docker-compose.test.yml up -d
 npm run graph:check      # 29 — graph core
@@ -576,7 +603,8 @@ npm run tools:check      # 46 — tool behaviour and the security refusals
 docker compose -f docker-compose.test.yml down
 ```
 
-`auth:check` is the odd one out: the auth decision is a pure function of the
-request and the environment, so it needs neither Neo4j nor Docker and runs in
-about a second. That is most of why it lives in `src/lib/mcp-auth.ts` instead
-of in the route.
+`auth:check` is the odd one out: both auth decisions are pure functions of a
+request, a profile and the environment, so it needs neither Neo4j nor Docker
+and runs in about a second. That is most of why they live in
+`src/lib/mcp-auth.ts` and `src/lib/allowlist.ts` rather than inside the route
+and the next-auth config.

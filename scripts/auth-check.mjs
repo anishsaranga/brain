@@ -27,6 +27,8 @@ const {
   resetMcpAuthAttempt,
 } = await import("@/lib/mcp-auth");
 
+const { allowedEmails, isEmailAllowed, isAllowedSignIn } = await import("@/lib/allowlist");
+
 let passed = 0;
 let failed = 0;
 async function check(name, fn) {
@@ -366,6 +368,98 @@ await check("it compares unequal lengths without throwing", () => {
   // timingSafeEqual throws on a length mismatch, which is why both sides are
   // hashed first. A throw here would be a 500 instead of a 404.
   assert.equal(constantTimeEquals("a", "a".repeat(5000)), false);
+});
+
+// ── Who may sign in ──────────────────────────────────────────────────────────
+//
+// Google proves identity; it never grants authorisation. Any Google account can
+// complete the OAuth flow, so this list is the whole boundary for the UI — and
+// the UI is where hard delete lives.
+
+section("Sign-in allowlist");
+
+const ALLOWED = "anish.saranga.dev@gmail.com";
+const setList = (v) => {
+  if (v === null) delete process.env.AUTH_ALLOWED_EMAILS;
+  else process.env.AUTH_ALLOWED_EMAILS = v;
+};
+const google = (email, verified = true) => ({ email, email_verified: verified });
+
+await check("the allowed address signs in", () => {
+  setList(ALLOWED);
+  assert.equal(isAllowedSignIn(google(ALLOWED)), true);
+});
+
+await check("any other Google account is refused", () => {
+  setList(ALLOWED);
+  for (const other of [
+    "someone.else@gmail.com",
+    "anish.saranga.dev@googlemail.com",
+    "anish.saranga@gmail.com",
+    `x${ALLOWED}`,
+    `${ALLOWED}x`,
+    `${ALLOWED}.evil.com`,
+    "evil.com?${ALLOWED}",
+  ]) {
+    assert.equal(isAllowedSignIn(google(other)), false, `${other} must be refused`);
+  }
+});
+
+await check("an UNVERIFIED address is refused even when it is the allowed one", () => {
+  // Google sets email_verified for gmail.com, but a Workspace or custom-domain
+  // account can present an address nobody proved control of.
+  setList(ALLOWED);
+  assert.equal(isAllowedSignIn(google(ALLOWED, false)), false);
+  assert.equal(isAllowedSignIn({ email: ALLOWED }), false);
+  assert.equal(isAllowedSignIn({ email: ALLOWED, email_verified: "true" }), false);
+});
+
+await check("case and whitespace variants of the allowed address pass", () => {
+  setList(ALLOWED);
+  for (const variant of [ALLOWED.toUpperCase(), `  ${ALLOWED}  `, "Anish.Saranga.Dev@Gmail.com"]) {
+    assert.equal(isAllowedSignIn(google(variant)), true, `${variant} should pass`);
+  }
+  setList(`  ${ALLOWED.toUpperCase()}  `);
+  assert.equal(isAllowedSignIn(google(ALLOWED)), true, "the LIST may be padded too");
+});
+
+await check("an unset or empty allowlist admits NOBODY", () => {
+  // Fails closed. The opposite default turns a forgotten variable into a
+  // world-writable knowledge base, which is the failure nobody notices.
+  for (const empty of [null, "", "   ", ",", " , , "]) {
+    setList(empty);
+    assert.deepEqual(allowedEmails(), [], `${JSON.stringify(empty)} should parse to no entries`);
+    assert.equal(isAllowedSignIn(google(ALLOWED)), false, "nobody gets in");
+    assert.equal(isEmailAllowed(ALLOWED), false);
+  }
+});
+
+await check("a missing or malformed profile is refused", () => {
+  setList(ALLOWED);
+  for (const bad of [null, undefined, {}, { email: null, email_verified: true }, { email: "", email_verified: true }]) {
+    assert.equal(isAllowedSignIn(bad), false, `${JSON.stringify(bad)} must be refused`);
+  }
+});
+
+await check("several addresses can be listed", () => {
+  setList(`${ALLOWED}, second@example.com`);
+  assert.equal(isAllowedSignIn(google(ALLOWED)), true);
+  assert.equal(isAllowedSignIn(google("second@example.com")), true);
+  assert.equal(isAllowedSignIn(google("third@example.com")), false);
+});
+
+await check("isEmailAllowed is what middleware re-checks per request", () => {
+  // Sessions are seven-day JWTs, so middleware re-checks the address on every
+  // request. Removing someone must lock them out at once, not when their
+  // token expires. This path has no email_verified to look at.
+  setList(ALLOWED);
+  assert.equal(isEmailAllowed(ALLOWED), true);
+  assert.equal(isEmailAllowed("someone.else@gmail.com"), false);
+  assert.equal(isEmailAllowed(null), false);
+  assert.equal(isEmailAllowed(undefined), false);
+
+  setList("second@example.com");
+  assert.equal(isEmailAllowed(ALLOWED), false, "revocation must take effect immediately");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
