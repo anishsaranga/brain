@@ -571,8 +571,21 @@ The allowlist is re-checked by `middleware.ts` on **every request**, not only
 at sign-in: sessions are seven-day JWTs, and removing an address should lock
 it out at once rather than when the token expires.
 
+**`PUBLIC_BASE_URL` must be the real public origin.** `docker-compose.yml`
+passes it through as `AUTH_URL`, and without that Auth.js derives the OAuth
+redirect URI from the incoming request — which behind the Cloudflare Tunnel
+is the container's own bind address. Google then receives
+`http://0.0.0.0:9999/api/auth/callback/google` and answers
+`Error 400: invalid_request`, since neither that host nor plain http is
+allowed. Check what is actually being sent with:
+
+```bash
+curl -s https://<HOSTNAME>/api/auth/providers
+```
+
 Setup is a Google Cloud OAuth 2.0 Client ID of type "Web application" with
-these authorized redirect URIs — the path is fixed by Auth.js:
+these authorized redirect URIs — the path is fixed by Auth.js, and must
+match `PUBLIC_BASE_URL` exactly:
 
 ```
 https://<HOSTNAME>/api/auth/callback/google

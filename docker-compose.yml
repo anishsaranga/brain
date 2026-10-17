@@ -57,8 +57,18 @@ services:
       # actually changes behaviour. Debian ships tzdata, so unlike that one
       # there is no extra package to install.
       - TZ=${TZ:-Asia/Kolkata}
-      # Used to build the /ingest/<batchId> deep links `remember` hands back.
+      # The public origin. Two things depend on it, which is why it is one
+      # variable and not two:
+      #   - the /ingest/<batchId> deep links `remember` hands back;
+      #   - AUTH_URL below.
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:9999}
+      # Auth.js derives the OAuth redirect_uri from the incoming request when
+      # this is unset. Behind the Cloudflare Tunnel that resolves to the
+      # container's own bind address, so Google was sent
+      # http://0.0.0.0:9999/api/auth/callback/google and refused the request
+      # outright — neither the host nor plain http is permitted. Setting it
+      # explicitly is the only reliable option behind a proxy.
+      - AUTH_URL=${PUBLIC_BASE_URL:-http://localhost:9999}
     env_file:
       - .env
     volumes:
