@@ -208,6 +208,12 @@ const mcpHandler = createMcpHandler(
                   .string()
                   .optional()
                   .describe("Optional question to show instead of the name during review."),
+                tracked: z
+                  .boolean()
+                  .optional()
+                  .describe(
+                    "Enrol in spaced repetition. Storing a concept does NOT track it. Set true when the user says they want to revise or be quizzed on it. Only true has effect; to stop tracking, use update_concept.",
+                  ),
               }),
             )
             .max(CAPS.concepts),
@@ -298,6 +304,47 @@ const mcpHandler = createMcpHandler(
     );
 
     server.registerTool(
+      "capture",
+      {
+        title: "Save a raw note to extract later",
+        description:
+          "Park something in the inbox without deciding yet what the " +
+          "concepts are. Use this when the user wants to keep a thought, " +
+          "quote or link but the conversation is about something else, or " +
+          "when there is not enough context to name and connect it " +
+          "properly. Nothing is embedded or linked. Later, inspect('inbox') " +
+          "lists what is waiting and remember({consumesInbox}) clears the " +
+          "items it extracted. Prefer remember when you already know what " +
+          "the concepts are — the inbox is for deferral, not for avoiding " +
+          "the work.",
+        inputSchema: z.object({
+          text: z.string().min(1).max(CAPS.bodyChars),
+          source: z
+            .object({
+              kind: z.enum(["conversation", "url", "book", "paper", "note"]),
+              ref: z.string().optional(),
+              title: z.string().optional(),
+            })
+            .optional(),
+        }),
+      },
+      ({ text, source }) => tool(() => T.captureTool(text, source))(),
+    );
+
+    server.registerTool(
+      "discard_capture",
+      {
+        title: "Drop an inbox item",
+        description:
+          "Remove a capture from the inbox without extracting anything from " +
+          "it. The text is kept, just marked done — use this for something " +
+          "captured by mistake or no longer worth keeping.",
+        inputSchema: z.object({ id: z.string().min(1) }),
+      },
+      ({ id }) => tool(() => T.discardCaptureTool(id))(),
+    );
+
+    server.registerTool(
       "undo_ingest",
       {
         title: "Reverse one remember call",
@@ -366,7 +413,9 @@ const mcpHandler = createMcpHandler(
                 `apply — they are what make the graph worth walking.\n` +
                 `5. If remember reports anything ambiguous, show me the candidates and ` +
                 `ask before deciding.\n` +
-                `6. Tell me what you created versus merged, and give me the review link.`,
+                `6. Set tracked on anything I say I want to revise, remember or be ` +
+                `quizzed on. Storing something does not enrol it in review.\n` +
+                `7. Tell me what you created versus merged, and give me the review link.`,
             },
           },
         ],

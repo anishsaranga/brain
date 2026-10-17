@@ -335,6 +335,69 @@ await check("sanitises filenames Windows would reject", async () => {
   assert.ok(!/[\\/:*?"<>|]/.test(files[0].filename), `got ${files[0].filename}`);
 });
 
+// ── Tombstones and the inbox ─────────────────────────────────────────────────
+//
+// Nothing had ever round-tripped a soft-deleted concept or a consumed inbox
+// item, and three properties written as datetime() were missing from
+// TEMPORAL_KEYS as a result: deletedAt, processedAt and undoneAt. A missing
+// key exports fine and restores as a plain STRING, so the data survives with
+// the wrong type — which is worse than losing it, because nothing complains.
+
+section("tombstones and inbox");
+
+const temporalType = async (match, prop) => {
+  const r = await read(`MATCH ${match} RETURN valueType(x.${prop}) AS t`);
+  return String(r.records[0]?.get("t") ?? "MISSING");
+};
+
+await check("a tombstoned concept and a consumed capture survive a round trip", async () => {
+  await write("MATCH (n) DETACH DELETE n");
+
+  const doomed = await G.upsertConcept({ name: "Doomed", body: "Will be tombstoned." });
+  const keeper = await G.upsertConcept({ name: "Keeper", body: "Stays alive." });
+  await G.linkConcepts(keeper.id, doomed.id, "RELATED_TO");
+  await G.softDeleteConcept(doomed.id);
+
+  await write(
+    `CREATE (b:Inbox { id: 'inbox-done', text: 'already extracted', at: datetime(),
+       processed: true, processedAt: datetime() })`,
+  );
+
+  const before = await exportGraph();
+  assert.ok(
+    before.nodes.Concept.some((c) => c.id === doomed.id),
+    "a tombstone is recoverable data and must be exported",
+  );
+
+  await write("MATCH (n) DETACH DELETE n");
+  await restoreGraph(before, { reEmbed: false });
+
+  const deletedAtType = await temporalType(`(x:Concept {id: '${doomed.id}'})`, "deletedAt");
+  assert.match(deletedAtType, /ZONED DATETIME|DATETIME/i,
+    `deletedAt came back as ${deletedAtType}`);
+
+  const processedAtType = await temporalType("(x:Inbox {id: 'inbox-done'})", "processedAt");
+  assert.match(processedAtType, /ZONED DATETIME|DATETIME/i,
+    `processedAt came back as ${processedAtType}`);
+});
+
+await check("the restored tombstone is still hidden, and still restorable", async () => {
+  // The type matters because of what reads it: `WHERE c.deletedAt IS NULL`
+  // happens to exclude a string too, so a wrong type hides rather than
+  // breaks — which is exactly why it went unnoticed for three properties.
+  const doomed = (await read("MATCH (c:Concept {name: 'Doomed'}) RETURN c.id AS id"))
+    .records[0].get("id");
+
+  assert.equal(await G.getConcept(doomed), null, "a tombstone must stay hidden");
+  const search = await G.hybridSearch("tombstoned", 10);
+  assert.ok(!search.some((r) => r.id === doomed), "and must not surface in search");
+
+  await G.restoreConcept(doomed);
+  const back = await G.getConcept(doomed);
+  assert.ok(back, "restore must bring it back");
+  assert.equal(back.name, "Doomed");
+});
+
 // ── Teardown ─────────────────────────────────────────────────────────────────
 
 await getDriver().close();

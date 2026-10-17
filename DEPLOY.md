@@ -462,7 +462,7 @@ monthly dump), mirrored off-box to OneDrive, with the restore rehearsed by 23
 round-trip checks on every run and freshness reported by /api/health. The one
 remaining manual step is registering the scheduled tasks.
 
-**Milestone 4 — MCP tools + auth.** Done. Thirteen tools and two prompts, a
+**Milestone 4 — MCP tools + auth.** Done. Fifteen tools and two prompts, a
 single-admin auth gate on the web app, soft delete, undoable batches, and 46
 checks covering the security refusals as well as the behaviour.
 
@@ -480,7 +480,7 @@ remains on the auth side is OAuth DCR.
 
 ## The MCP tool surface
 
-Thirteen tools and two prompts, at `/mcp/<MCP_PATH_SECRET>`. The design
+Fifteen tools and two prompts, at `/mcp/<MCP_PATH_SECRET>`. The design
 constraint throughout is that this is **write access to the knowledge base,
 driven by a language model, over a public endpoint** — and that content
 ingested today is read back into other conversations weeks later, which is
@@ -598,8 +598,8 @@ npm run auth:check       # 49 — MCP auth + the sign-in allowlist; no container
 
 docker compose -f docker-compose.test.yml up -d
 npm run graph:check      # 29 — graph core
-npm run backup:check     # 23 — export/restore round trip
-npm run tools:check      # 46 — tool behaviour and the security refusals
+npm run backup:check     # 25 — export/restore round trip
+npm run tools:check      # 59 — tool behaviour and the security refusals
 docker compose -f docker-compose.test.yml down
 ```
 

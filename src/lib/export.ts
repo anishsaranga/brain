@@ -37,6 +37,17 @@ export const KNOWN_LABELS = ["Concept", "Topic", "Source", "Ingest", "Inbox"] as
  * — a mismatch here would restore review schedules as plain strings and break
  * every `due` comparison in the review queue.
  */
+/**
+ * Properties written as Cypher `datetime()` somewhere in the codebase.
+ *
+ * This list is not cosmetic. A key missing from it exports fine (as an ISO
+ * string) and then restores as a plain STRING rather than a temporal, so the
+ * round trip silently changes a property's type. `deletedAt`, `processedAt`
+ * and `undoneAt` were all missing until a tombstone round trip was finally
+ * tested — nothing had ever exercised one.
+ *
+ * Anything new that is SET to datetime() belongs here.
+ */
 export const TEMPORAL_KEYS = new Set([
   "createdAt",
   "updatedAt",
@@ -45,6 +56,10 @@ export const TEMPORAL_KEYS = new Set([
   "capturedAt",
   "reinforcedAt",
   "at",
+  "deletedAt",
+  "processedAt",
+  "discardedAt",
+  "undoneAt",
 ]);
 
 export interface ExportFile {

@@ -14,7 +14,14 @@ import { read, int } from "@/lib/neo4j";
 import { embed, embeddingText } from "@/lib/embeddings";
 import { guardCypher } from "@/lib/cypher-guard";
 import { dueForReview, recordReview, type Grade } from "@/lib/fsrs";
-import { remember, undoIngest, type RememberInput } from "@/lib/ingest";
+import {
+  remember,
+  undoIngest,
+  capture,
+  discardCapture,
+  type RememberInput,
+  type CaptureSource,
+} from "@/lib/ingest";
 
 /**
  * The MCP tool implementations.
@@ -442,6 +449,31 @@ export async function deleteConceptTool(id: string): Promise<ToolOutput> {
       `Deleted "${result.name}". This is a tombstone, not a removal — the ` +
       `concept and its links survive and it can be restored.`,
     data: { ...result, id: concept.id, recoverable: true },
+  };
+}
+
+export async function captureTool(
+  text: string,
+  source?: CaptureSource,
+): Promise<ToolOutput> {
+  const result = await capture(text, source);
+  return {
+    summary:
+      `Captured. ${result.backlog} item(s) now waiting to be extracted` +
+      (result.backlog >= 10
+        ? `, which is a backlog worth clearing — run inspect("inbox").`
+        : `.`),
+    data: { id: result.id, backlog: result.backlog },
+  };
+}
+
+export async function discardCaptureTool(id: string): Promise<ToolOutput> {
+  const { discarded } = await discardCapture(id);
+  return {
+    summary: discarded
+      ? "Capture discarded. It leaves the inbox but the text is kept."
+      : `No unprocessed capture with id "${id}". It may already be cleared.`,
+    data: { id, discarded },
   };
 }
 

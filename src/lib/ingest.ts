@@ -66,6 +66,18 @@ export interface RememberConcept {
   aliases?: string[];
   topics?: string[];
   prompt?: string;
+  /**
+   * Enrol in spaced repetition. Storing something does not track it, so
+   * without this field enrolling takes a second `update_concept` call that
+   * in practice never happens.
+   *
+   * Only `true` has any effect here: `false` means "no opinion", never
+   * "untrack". A later conversation mentioning a concept in passing must
+   * not silently drop it out of review — the same reasoning that makes a
+   * merge append to a body rather than replace it. Untracking is
+   * `update_concept`'s job, where it is the explicit point of the call.
+   */
+  tracked?: boolean;
 }
 
 export interface RememberLink {
@@ -125,6 +137,93 @@ function baseUrl(): string {
 }
 
 export class CapExceededError extends Error {}
+
+// ── The inbox ────────────────────────────────────────────────────────────────
+//
+// Capture and extraction are different acts at different moments. You meet an
+// idea while doing something else and have neither the time nor the context to
+// decide what the concepts are, what they are called, or what they link to —
+// and forcing that decision then is how capture stops happening at all.
+//
+// So the inbox holds raw text with no structure and no embedding, and
+// `remember({consumesInbox})` clears it in the same transaction as the write
+// it produced.
+
+export interface CaptureResult {
+  id: string;
+  /** Unprocessed items now waiting, so a growing backlog is visible. */
+  backlog: number;
+}
+
+export interface CaptureSource {
+  kind: string;
+  ref?: string;
+  title?: string;
+}
+
+export async function capture(
+  text: string,
+  source?: CaptureSource,
+): Promise<CaptureResult> {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) throw new Error("Nothing to capture: the text is empty.");
+  if (trimmed.length > CAPS.bodyChars) {
+    throw new CapExceededError(
+      `Capture is ${trimmed.length} characters; the limit is ${CAPS.bodyChars}. ` +
+        `Nothing has been written. Split it, or extract concepts directly with remember.`,
+    );
+  }
+
+  const result = await write(
+    `
+    CREATE (b:Inbox {
+      id: randomUUID(),
+      text: $text,
+      at: datetime(),
+      processed: false,
+      sourceKind: $kind,
+      sourceRef: $ref,
+      sourceTitle: $title
+    })
+    RETURN b.id AS id
+    `,
+    {
+      text: trimmed,
+      kind: source?.kind ?? null,
+      ref: source?.ref ?? null,
+      title: source?.title ?? null,
+    },
+  );
+
+  const backlog = await read(
+    "MATCH (b:Inbox) WHERE coalesce(b.processed, false) = false RETURN count(b) AS n",
+  );
+
+  return {
+    id: String(result.records[0]?.get("id")),
+    backlog: backlog.records[0]?.get("n")?.toNumber?.() ?? 0,
+  };
+}
+
+/**
+ * Drop a capture without extracting anything from it.
+ *
+ * Without this a mis-captured note can never leave the inbox, since the only
+ * other exit is `remember({consumesInbox})`, which requires concepts. It
+ * marks rather than destroys, like everything else reachable over MCP.
+ */
+export async function discardCapture(id: string): Promise<{ discarded: boolean }> {
+  const result = await write(
+    `
+    MATCH (b:Inbox {id: $id})
+    WHERE coalesce(b.processed, false) = false
+    SET b.processed = true, b.discardedAt = datetime()
+    RETURN b.id AS id
+    `,
+    { id },
+  );
+  return { discarded: result.records.length > 0 };
+}
 
 function enforceCaps(input: RememberInput): void {
   const concepts = input.concepts ?? [];
@@ -395,6 +494,9 @@ export async function remember(input: RememberInput): Promise<RememberResult> {
           : item.input.body,
       prompt: item.input.prompt,
       topics: item.input.topics,
+      // `undefined` rather than `false`, so upsertConcept's null-guard
+      // leaves existing tracking alone. See RememberConcept.tracked.
+      tracked: item.input.tracked === true ? true : undefined,
       ingestId: batchId,
     });
     nameToId.set(item.input.name.toLocaleLowerCase(), result.id);

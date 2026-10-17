@@ -37,7 +37,8 @@ const { getDriver, read, write, waitForNeo4j } = await import("@/lib/neo4j");
 const { ensureSchema } = await import("@/lib/schema");
 const G = await import("@/lib/graph");
 const T = await import("@/lib/tools");
-const { remember, undoIngest, CAPS, AMBIGUITY_THRESHOLD } = await import("@/lib/ingest");
+const { remember, undoIngest, capture, discardCapture, CAPS, AMBIGUITY_THRESHOLD } =
+  await import("@/lib/ingest");
 const { guardCypher } = await import("@/lib/cypher-guard");
 
 let passed = 0;
@@ -583,6 +584,155 @@ await check("no tool result or error contains either MCP credential", async () =
       assert.ok(!text.includes(secret), "an MCP credential must never reach a tool result");
     }
   }
+});
+
+// ── The inbox ────────────────────────────────────────────────────────────────
+//
+// Capture and extraction happen at different moments. The inbox existed in the
+// schema from the start and `remember({consumesInbox})` could clear it, but
+// nothing could ever PUT anything in it — so deferred capture did not work at
+// all until these two tools.
+
+section("capture");
+
+await check("a capture reaches the inbox and comes back from inspect", async () => {
+  await reset();
+  const { id, backlog } = await capture("Read the Raft paper, section 5.2");
+  assert.ok(id, "capture must return an id to consume later");
+  assert.equal(backlog, 1);
+
+  const out = await T.inspect("inbox");
+  assert.equal(out.data.length, 1);
+  assert.equal(out.data[0].id, id);
+  assert.match(out.data[0].text, /Raft paper/);
+});
+
+await check("the backlog count is reported so neglect is visible", async () => {
+  await reset();
+  for (let i = 0; i < 3; i++) await capture(`note ${i}`);
+  const { backlog } = await capture("one more");
+  assert.equal(backlog, 4);
+});
+
+await check("a capture carries its source", async () => {
+  await reset();
+  const { id } = await capture("quote from the paper", {
+    kind: "paper",
+    ref: "https://raft.github.io/raft.pdf",
+    title: "In Search of an Understandable Consensus Algorithm",
+  });
+  const r = await read(
+    "MATCH (b:Inbox {id: $id}) RETURN b.sourceKind AS k, b.sourceRef AS ref",
+    { id },
+  );
+  assert.equal(r.records[0].get("k"), "paper");
+  assert.match(String(r.records[0].get("ref")), /raft\.github\.io/);
+});
+
+await check("an empty capture is refused", async () => {
+  await reset();
+  await assert.rejects(() => capture("   "));
+  const out = await T.inspect("inbox");
+  assert.equal(out.data.length, 0, "nothing should have been written");
+});
+
+await check("an over-cap capture is REJECTED, not truncated", async () => {
+  await reset();
+  await assert.rejects(() => capture("x".repeat(CAPS.bodyChars + 1)));
+  const out = await T.inspect("inbox");
+  assert.equal(out.data.length, 0, "a rejected capture must write nothing");
+});
+
+await check("consumesInbox clears a capture atomically with the write", async () => {
+  await reset();
+  const { id } = await capture("Raft uses a replicated log");
+  await remember({
+    concepts: [{ name: "Replicated log", body: "An ordered, durable sequence." }],
+    consumesInbox: [id],
+  });
+  const out = await T.inspect("inbox");
+  assert.equal(out.data.length, 0, "the capture should be cleared");
+
+  const r = await read("MATCH (b:Inbox {id: $id}) RETURN b.processed AS p", { id });
+  assert.equal(r.records[0].get("p"), true, "marked, not deleted");
+});
+
+await check("discard removes it from the inbox without destroying the text", async () => {
+  await reset();
+  const { id } = await capture("captured by mistake");
+  const { discarded } = await discardCapture(id);
+  assert.equal(discarded, true);
+
+  const out = await T.inspect("inbox");
+  assert.equal(out.data.length, 0);
+
+  const r = await read(
+    "MATCH (b:Inbox {id: $id}) RETURN b.text AS text, b.discardedAt IS NOT NULL AS marked",
+    { id },
+  );
+  assert.match(String(r.records[0].get("text")), /by mistake/, "text is kept");
+  assert.equal(r.records[0].get("marked"), true);
+});
+
+await check("discarding an unknown or already-cleared id is a reported no-op", async () => {
+  await reset();
+  assert.deepEqual(await discardCapture("does-not-exist"), { discarded: false });
+
+  const { id } = await capture("once");
+  await discardCapture(id);
+  assert.deepEqual(await discardCapture(id), { discarded: false }, "second discard is a no-op");
+});
+
+// ── Tracking through remember ────────────────────────────────────────────────
+
+section("tracked");
+
+await check("storing a concept does NOT enrol it in review", async () => {
+  await reset();
+  await remember({ concepts: [{ name: "Untracked thing", body: "Just stored." }] });
+  const due = await T.dueForReviewTool(20);
+  assert.equal(due.data.cards.length, 0, "storage and rehearsal stay separate");
+});
+
+await check("remember({tracked: true}) enrols in one call", async () => {
+  await reset();
+  await remember({
+    concepts: [{ name: "Raft", body: "A consensus protocol.", tracked: true }],
+  });
+  const due = await T.dueForReviewTool(20);
+  assert.equal(due.data.cards.length, 1);
+  assert.equal(due.data.cards[0].name, "Raft");
+});
+
+await check("a later mention with tracked:false does NOT untrack", async () => {
+  // The whole reason only `true` has effect. A passing mention in some other
+  // conversation must not silently drop a concept out of review — the same
+  // reasoning that makes a merge append to a body rather than replace it.
+  await reset();
+  await remember({ concepts: [{ name: "Raft", body: "A consensus protocol.", tracked: true }] });
+  await remember({ concepts: [{ name: "Raft", body: "Mentioned again.", tracked: false }] });
+
+  const r = await read("MATCH (c:Concept {nameLower: 'raft'}) RETURN c.tracked AS t");
+  assert.equal(r.records[0].get("t"), true, "tracking must survive");
+});
+
+await check("omitting tracked leaves existing tracking alone", async () => {
+  await reset();
+  await remember({ concepts: [{ name: "Raft", body: "A consensus protocol.", tracked: true }] });
+  await remember({ concepts: [{ name: "Raft", body: "More detail." }] });
+  const r = await read("MATCH (c:Concept {nameLower: 'raft'}) RETURN c.tracked AS t");
+  assert.equal(r.records[0].get("t"), true);
+});
+
+await check("update_concept is still how you stop tracking", async () => {
+  await reset();
+  const res = await remember({
+    concepts: [{ name: "Raft", body: "A consensus protocol.", tracked: true }],
+  });
+  const id = res.concepts[0].id;
+  await T.updateConcept(id, { tracked: false });
+  const r = await read("MATCH (c:Concept {id: $id}) RETURN c.tracked AS t", { id });
+  assert.equal(r.records[0].get("t"), false);
 });
 
 // ── Teardown ─────────────────────────────────────────────────────────────────
