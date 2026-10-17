@@ -1,0 +1,117 @@
+.undone {
+  margin-bottom: var(--s5);
+  padding: var(--s4);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line));
+  border-radius: var(--radius);
+  background: var(--danger-wash);
+  color: var(--muted);
+  font-size: var(--step--1);
+  line-height: 1.65;
+  max-width: 68ch;
+}
+
+.hint {
+  margin: 0 0 var(--s3);
+  color: var(--muted);
+  font-size: var(--step--1);
+  line-height: 1.6;
+  max-width: 68ch;
+}
+
+/* ── Concepts ─────────────────────────────────────────────────────────────── */
+
+.concept {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.clickable {
+  transition:
+    border-color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.clickable:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--accent-wash);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .clickable:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.conceptBody {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.conceptName {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.snippet {
+  color: var(--muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+/* ── Links ────────────────────────────────────────────────────────────────── */
+
+.link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.gone {
+  opacity: 0.6;
+  background: var(--bg-sunken);
+}
+
+.linkBody {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  min-width: 0;
+  font-size: var(--step-0);
+}
+
+.linkName {
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.linkName:hover {
+  color: var(--accent);
+}
+
+.gone .linkName {
+  text-decoration: line-through;
+}
+
+.rel {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}

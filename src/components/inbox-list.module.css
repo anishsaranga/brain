@@ -1,0 +1,86 @@
+.ok,
+.bad {
+  margin: 0 0 var(--s4);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  font-size: var(--step--1);
+}
+
+.ok {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.bad {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s3);
+}
+
+.item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.text {
+  margin: 0;
+  padding: var(--s4);
+  /* pre-wrap, so the line breaks someone typed survive. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-family: var(--serif);
+  font-size: var(--step-1);
+  line-height: 1.6;
+  /* Long captures are clipped rather than allowed to push the page around;
+     the full text is on the node and goes to Claude intact. */
+  max-height: 22em;
+  overflow-y: auto;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s4);
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.when {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.discard {
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-size: var(--step--1);
+  cursor: pointer;
+  transition:
+    color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+
+.discard:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-wash);
+}
+
+.discard:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}

@@ -268,6 +268,16 @@
   max-width: 68ch;
 }
 
+.sub {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: var(--step--1);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .datum {
   font-family: var(--mono);
   font-size: 0.82em;

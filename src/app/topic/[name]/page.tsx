@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { conceptsInTopic } from "@/lib/graph";
 import { excerpt } from "@/lib/markdown";
-import { Page, PageHeader, List, RowLink, Empty, Tag, When } from "@/components/ui";
+import { Page, PageHeader, List, RowLink, Empty, Tag, When, Sub } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -57,19 +57,7 @@ export default async function TopicPage({
               }
             >
               <span>{c.name}</span>
-              {c.body && (
-                <span
-                  style={{
-                    display: "block",
-                    color: "var(--muted)",
-                    fontWeight: 400,
-                    fontSize: "var(--step--1)",
-                    marginTop: "0.15rem",
-                  }}
-                >
-                  {excerpt(c.body, 120)}
-                </span>
-              )}
+              {c.body && <Sub>{excerpt(c.body, 120)}</Sub>}
             </RowLink>
           ))}
         </List>

@@ -8,6 +8,11 @@ import {
   restoreConcept,
   getRevisions,
   upsertConcept,
+  listInbox,
+  listFlagged,
+  listOrphans,
+  listStale,
+  setConceptFlags,
   REL_TYPES,
 } from "@/lib/graph";
 import { read, int } from "@/lib/neo4j";
@@ -181,17 +186,12 @@ export type InspectWhat = "inbox" | "flagged" | "orphans" | "stale" | "health";
 
 export async function inspect(what: InspectWhat): Promise<ToolOutput> {
   switch (what) {
+    // Every branch here reads through graph.ts rather than holding its own
+    // Cypher. The explorer needs the same five answers, and a second copy of
+    // each query is how the UI and Claude start quietly disagreeing about
+    // what "orphan" means.
     case "inbox": {
-      const result = await read(`
-        MATCH (b:Inbox) WHERE coalesce(b.processed, false) = false
-        RETURN b.id AS id, b.text AS text, b.at AS at
-        ORDER BY b.at ASC LIMIT 50
-      `);
-      const items = result.records.map((r) => ({
-        id: String(r.get("id")),
-        text: String(r.get("text")),
-        at: String(r.get("at")),
-      }));
+      const items = await listInbox(50);
       return {
         summary:
           items.length === 0
@@ -203,16 +203,11 @@ export async function inspect(what: InspectWhat): Promise<ToolOutput> {
       };
     }
     case "flagged": {
-      const result = await read(`
-        MATCH (c:Concept) WHERE c.deletedAt IS NULL AND c.flagged = true
-        RETURN c.id AS id, c.name AS name, c.flagNote AS note, c.body AS body
-        ORDER BY c.updatedAt DESC LIMIT 50
-      `);
-      const items = result.records.map((r) => ({
-        id: String(r.get("id")),
-        name: String(r.get("name")),
-        note: (r.get("note") as string) ?? null,
-        snippet: snippet((r.get("body") as string) ?? ""),
+      const items = (await listFlagged(50)).map((c) => ({
+        id: c.id,
+        name: c.name,
+        note: c.note,
+        snippet: snippet(c.body),
       }));
       return {
         summary:
@@ -224,16 +219,10 @@ export async function inspect(what: InspectWhat): Promise<ToolOutput> {
       };
     }
     case "orphans": {
-      const result = await read(`
-        MATCH (c:Concept) WHERE c.deletedAt IS NULL
-          AND count{ (c)-[]-(n:Concept) WHERE n.deletedAt IS NULL } <= 1
-        RETURN c.id AS id, c.name AS name, c.createdAt AS createdAt
-        ORDER BY c.createdAt ASC LIMIT 50
-      `);
-      const items = result.records.map((r) => ({
-        id: String(r.get("id")),
-        name: String(r.get("name")),
-        createdAt: String(r.get("createdAt")),
+      const items = (await listOrphans(50)).map((c) => ({
+        id: c.id,
+        name: c.name,
+        createdAt: c.createdAt,
       }));
       return {
         summary:
@@ -246,20 +235,11 @@ export async function inspect(what: InspectWhat): Promise<ToolOutput> {
       };
     }
     case "stale": {
-      const result = await read(`
-        MATCH (c:Concept) WHERE c.deletedAt IS NULL AND c.tracked = true
-        RETURN c.id AS id, c.name AS name, c.lastReview AS lastReview
-        ORDER BY coalesce(c.lastReview, datetime('1970-01-01T00:00:00Z')) ASC
-        LIMIT 25
-      `);
+      const items = await listStale(25);
       return {
-        summary: `${result.records.length} tracked concept(s), least recently reviewed first.`,
-        containsUserContent: result.records.length > 0,
-        data: result.records.map((r) => ({
-          id: String(r.get("id")),
-          name: String(r.get("name")),
-          lastReview: r.get("lastReview") ? String(r.get("lastReview")) : null,
-        })),
+        summary: `${items.length} tracked concept(s), least recently reviewed first.`,
+        containsUserContent: items.length > 0,
+        data: items,
       };
     }
     case "health":
@@ -395,20 +375,11 @@ export async function updateConcept(id: string, patch: UpdatePatch): Promise<Too
     });
   }
 
-  const flags: Record<string, unknown> = {};
-  if (patch.tracked !== undefined) flags.tracked = patch.tracked;
-  if (patch.flagged !== undefined) flags.flagged = patch.flagged;
-  if (patch.flagNote !== undefined) flags.flagNote = patch.flagNote;
-
-  if (Object.keys(flags).length > 0) {
-    await (await import("@/lib/neo4j")).write(
-      `
-      MATCH (c:Concept {id: $id})
-      SET c += $flags, c.updatedAt = datetime()
-      `,
-      { id: concept.id, flags },
-    );
-  }
+  await setConceptFlags(concept.id, {
+    tracked: patch.tracked,
+    flagged: patch.flagged,
+    flagNote: patch.flagNote,
+  });
 
   const after = await getConcept(concept.id);
   const revisions = await getRevisions(concept.id);

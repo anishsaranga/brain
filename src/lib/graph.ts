@@ -921,6 +921,344 @@ export async function unlinkedNeighbours(
   return findSimilar(vec, { excludeIds: exclude, limit, minScore: 0.5 });
 }
 
+/* ── The maintenance surfaces ──────────────────────────────────────────────
+ *
+ * These four queries used to live inside `inspect` in tools.ts, reachable
+ * only over MCP. The explorer needs the same five answers, and a second copy
+ * of each query is how the UI and Claude start quietly disagreeing about what
+ * "orphan" means. Lifted here and called from both, the way
+ * `unlinkedNeighbours` is already shared by the suggest-links tool and the
+ * concept page.
+ */
+
+export interface InboxItem {
+  id: string;
+  text: string;
+  at: string;
+}
+
+/** Captures waiting to be turned into concepts, oldest first. */
+export async function listInbox(limit = 50): Promise<InboxItem[]> {
+  const result = await read(
+    `
+    MATCH (b:Inbox) WHERE coalesce(b.processed, false) = false
+    RETURN b.id AS id, b.text AS text, b.at AS at
+    ORDER BY b.at ASC LIMIT $limit
+    `,
+    { limit: int(Math.max(1, Math.min(500, limit))) },
+  );
+  return result.records.map((r) => ({
+    id: String(r.get("id")),
+    text: String(r.get("text")),
+    at: String(r.get("at")),
+  }));
+}
+
+export interface FlaggedConcept {
+  id: string;
+  name: string;
+  note: string | null;
+  body: string;
+}
+
+/** Concepts marked wrong or unclear, most recently touched first. */
+export async function listFlagged(limit = 50): Promise<FlaggedConcept[]> {
+  const result = await read(
+    `
+    MATCH (c:Concept) WHERE ${ALIVE} AND c.flagged = true
+    RETURN c.id AS id, c.name AS name, c.flagNote AS note, c.body AS body
+    ORDER BY c.updatedAt DESC LIMIT $limit
+    `,
+    { limit: int(Math.max(1, Math.min(500, limit))) },
+  );
+  return result.records.map((r) => ({
+    id: String(r.get("id")),
+    name: String(r.get("name")),
+    note: (r.get("note") as string) ?? null,
+    body: (r.get("body") as string) ?? "",
+  }));
+}
+
+export interface OrphanConcept {
+  id: string;
+  name: string;
+  createdAt: string;
+  links: number;
+}
+
+/**
+ * Concepts with one link or none, oldest first.
+ *
+ * "One or none" rather than "none" on purpose: a concept joined to exactly
+ * one other is almost always the tail of a single conversation that never
+ * got stitched into anything, which is the same problem.
+ */
+export async function listOrphans(limit = 50): Promise<OrphanConcept[]> {
+  const result = await read(
+    `
+    MATCH (c:Concept) WHERE ${ALIVE}
+      AND count{ (c)-[]-(n:Concept) WHERE n.deletedAt IS NULL } <= 1
+    RETURN c.id AS id, c.name AS name, c.createdAt AS createdAt,
+           count{ (c)-[]-(n:Concept) WHERE n.deletedAt IS NULL } AS links
+    ORDER BY c.createdAt ASC LIMIT $limit
+    `,
+    { limit: int(Math.max(1, Math.min(500, limit))) },
+  );
+  return result.records.map((r) => ({
+    id: String(r.get("id")),
+    name: String(r.get("name")),
+    createdAt: String(r.get("createdAt")),
+    links: num(r.get("links")),
+  }));
+}
+
+export interface StaleConcept {
+  id: string;
+  name: string;
+  lastReview: string | null;
+}
+
+/** Tracked concepts, least recently reviewed first. */
+export async function listStale(limit = 25): Promise<StaleConcept[]> {
+  const result = await read(
+    `
+    MATCH (c:Concept) WHERE ${ALIVE} AND c.tracked = true
+    RETURN c.id AS id, c.name AS name, c.lastReview AS lastReview
+    ORDER BY coalesce(c.lastReview, datetime('1970-01-01T00:00:00Z')) ASC
+    LIMIT $limit
+    `,
+    { limit: int(Math.max(1, Math.min(500, limit))) },
+  );
+  return result.records.map((r) => ({
+    id: String(r.get("id")),
+    name: String(r.get("name")),
+    lastReview: r.get("lastReview") ? String(r.get("lastReview")) : null,
+  }));
+}
+
+/** Live concepts with no topic. They are invisible from the overview. */
+export async function listUntopiced(limit = 50): Promise<Concept[]> {
+  const result = await read(
+    `
+    MATCH (c:Concept)
+    WHERE ${ALIVE} AND NOT (c)-[:PART_OF]->(:Topic)
+    RETURN c AS concept
+    ORDER BY c.updatedAt DESC LIMIT $limit
+    `,
+    { limit: int(Math.max(1, Math.min(500, limit))) },
+  );
+  return result.records.map((r) =>
+    toConcept((r.get("concept") as { properties: Record<string, unknown> }).properties, []),
+  );
+}
+
+/**
+ * Set the flags that are not part of the body upsert.
+ *
+ * `tracked`, `flagged` and `flagNote` are plain properties with no revision
+ * history and no embedding consequences, so they do not belong in
+ * `upsertConcept`, which identifies by name and keeps revisions. Keyed on id
+ * because every caller already has one.
+ */
+export async function setConceptFlags(
+  id: string,
+  flags: { tracked?: boolean; flagged?: boolean; flagNote?: string | null },
+): Promise<boolean> {
+  const patch: Record<string, unknown> = {};
+  if (flags.tracked !== undefined) patch.tracked = flags.tracked;
+  if (flags.flagged !== undefined) patch.flagged = flags.flagged;
+  if (flags.flagNote !== undefined) patch.flagNote = flags.flagNote;
+  if (Object.keys(patch).length === 0) return true;
+
+  const result = await write(
+    `
+    MATCH (c:Concept {id: $id})
+    SET c += $patch, c.updatedAt = datetime()
+    RETURN count(c) AS n
+    `,
+    { id, patch },
+  );
+  return num(result.records[0]?.get("n")) > 0;
+}
+
+/* ── Ingest batches ────────────────────────────────────────────────────────
+ *
+ * `remember` has always returned a `reviewUrl` pointing at /ingest/<id>, and
+ * that page did not exist, so the system handed out a dead link on its most
+ * used path. Everything the page needs was already being written to the
+ * :Ingest node; it just had no reader.
+ */
+
+export interface IngestSummary {
+  id: string;
+  at: string;
+  summary: string;
+  toolCaller: string | null;
+  undone: boolean;
+  undoneAt: string | null;
+  created: number;
+  merged: number;
+  edges: number;
+}
+
+/** Every batch, newest first. */
+export async function listIngests(limit = 50): Promise<IngestSummary[]> {
+  const result = await read(
+    `
+    MATCH (i:Ingest)
+    RETURN i.id AS id, i.at AS at, i.summary AS summary,
+           i.toolCaller AS toolCaller,
+           coalesce(i.undone, false) AS undone, i.undoneAt AS undoneAt,
+           size(coalesce(i.createdIds, []))   AS created,
+           size(coalesce(i.mergedIds, []))    AS merged,
+           size(coalesce(i.createdEdges, [])) AS edges
+    ORDER BY i.at DESC LIMIT $limit
+    `,
+    { limit: int(Math.max(1, Math.min(200, limit))) },
+  );
+  return result.records.map((r) => ({
+    id: String(r.get("id")),
+    at: String(r.get("at")),
+    summary: (r.get("summary") as string) ?? "",
+    toolCaller: (r.get("toolCaller") as string) ?? null,
+    undone: Boolean(r.get("undone")),
+    undoneAt: r.get("undoneAt") ? String(r.get("undoneAt")) : null,
+    created: num(r.get("created")),
+    merged: num(r.get("merged")),
+    edges: num(r.get("edges")),
+  }));
+}
+
+export interface BatchConcept {
+  id: string;
+  name: string;
+  body: string;
+  /** A concept an undo tombstoned still belongs on the page, marked. */
+  deleted: boolean;
+}
+
+export interface BatchEdge {
+  from: string;
+  to: string;
+  type: string;
+  fromName: string;
+  toName: string;
+  /** False once an undo has removed it. */
+  present: boolean;
+}
+
+export interface IngestBatch extends IngestSummary {
+  createdConcepts: BatchConcept[];
+  mergedConcepts: BatchConcept[];
+  links: BatchEdge[];
+}
+
+/**
+ * One batch, with the concepts and links resolved to names.
+ *
+ * Tombstoned concepts are deliberately included and marked rather than
+ * filtered out. After an undo every concept the batch created is a tombstone,
+ * and a page that hid them would show an empty batch, which looks like data
+ * loss rather than a successful undo.
+ */
+export async function getIngestBatch(id: string): Promise<IngestBatch | null> {
+  const found = await read(
+    `
+    MATCH (i:Ingest {id: $id})
+    RETURN i.id AS id, i.at AS at, i.summary AS summary,
+           i.toolCaller AS toolCaller,
+           coalesce(i.undone, false) AS undone, i.undoneAt AS undoneAt,
+           coalesce(i.createdIds, [])   AS createdIds,
+           coalesce(i.mergedIds, [])    AS mergedIds,
+           coalesce(i.createdEdges, []) AS createdEdges
+    `,
+    { id },
+  );
+  const rec = found.records[0];
+  if (!rec) return null;
+
+  const createdIds = (rec.get("createdIds") as string[]) ?? [];
+  const mergedIds = (rec.get("mergedIds") as string[]) ?? [];
+  const rawEdges = ((rec.get("createdEdges") as string[]) ?? []).flatMap((s) => {
+    try {
+      return [JSON.parse(s) as { from: string; to: string; type: string }];
+    } catch {
+      // A malformed record should cost one link, not the whole page.
+      return [];
+    }
+  });
+
+  const names = new Map<string, { name: string; body: string; deleted: boolean }>();
+  const wanted = [...new Set([...createdIds, ...mergedIds, ...rawEdges.flatMap((e) => [e.from, e.to])])];
+  if (wanted.length > 0) {
+    const rows = await read(
+      `
+      UNWIND $ids AS id
+      MATCH (c:Concept {id: id})
+      RETURN c.id AS id, c.name AS name, c.body AS body,
+             c.deletedAt IS NOT NULL AS deleted
+      `,
+      { ids: wanted },
+    );
+    for (const row of rows.records) {
+      names.set(String(row.get("id")), {
+        name: String(row.get("name")),
+        body: (row.get("body") as string) ?? "",
+        deleted: Boolean(row.get("deleted")),
+      });
+    }
+  }
+
+  // Which of the batch's links are still in the graph. An undo removes them
+  // outright, and a later edit may have removed one by hand.
+  const present = new Set<string>();
+  if (rawEdges.length > 0) {
+    const live = await read(
+      `
+      MATCH (a:Concept)-[r]->(b:Concept)
+      WHERE r.ingestId = $id
+      RETURN a.id AS from, b.id AS to, type(r) AS type
+      `,
+      { id },
+    );
+    for (const row of live.records) {
+      present.add(`${row.get("from")}|${row.get("to")}|${row.get("type")}`);
+    }
+  }
+
+  const resolve = (cid: string): BatchConcept => {
+    const hit = names.get(cid);
+    return {
+      id: cid,
+      // A hard delete from /trash can remove a concept a batch created, so
+      // the id may no longer resolve to anything.
+      name: hit?.name ?? "(destroyed)",
+      body: hit?.body ?? "",
+      deleted: hit?.deleted ?? true,
+    };
+  };
+
+  return {
+    id: String(rec.get("id")),
+    at: String(rec.get("at")),
+    summary: (rec.get("summary") as string) ?? "",
+    toolCaller: (rec.get("toolCaller") as string) ?? null,
+    undone: Boolean(rec.get("undone")),
+    undoneAt: rec.get("undoneAt") ? String(rec.get("undoneAt")) : null,
+    created: createdIds.length,
+    merged: mergedIds.length,
+    edges: rawEdges.length,
+    createdConcepts: createdIds.map(resolve),
+    mergedConcepts: mergedIds.map(resolve),
+    links: rawEdges.map((e) => ({
+      ...e,
+      fromName: names.get(e.from)?.name ?? "(destroyed)",
+      toName: names.get(e.to)?.name ?? "(destroyed)",
+      present: present.has(`${e.from}|${e.to}|${e.type}`),
+    })),
+  };
+}
+
 /**
  * Rename a concept, keyed on its id.
  *

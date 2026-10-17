@@ -500,6 +500,15 @@ await check("the matcher gates every page of the explorer", () => {
     "/c/abc-123",
     "/topic/Distributed%20systems",
     "/review",
+    // The maintenance surfaces. /ingest/<id> in particular is the one route
+    // whose URL leaves this system: `remember` returns it to Claude on every
+    // successful call, so it is the likeliest of all of these to be pasted
+    // somewhere and followed by someone who is not signed in.
+    "/inbox",
+    "/ingest",
+    "/ingest/39a6dc56-e1a9-4714-90b8-aebd8798f42c",
+    "/hygiene",
+    "/graph",
     "/anything/we/add/later",
   ]) {
     assert.equal(gated(path), true, `${path} MUST be gated`);

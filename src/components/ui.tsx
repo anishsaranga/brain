@@ -184,6 +184,11 @@ export function Note({ children }: { children: React.ReactNode }) {
   return <p className={styles.note}>{children}</p>;
 }
 
+/** The quiet second line inside a row: a snippet, a flag note, a reason. */
+export function Sub({ children }: { children: React.ReactNode }) {
+  return <span className={styles.sub}>{children}</span>;
+}
+
 /** Monospaced inline datum: an id, a count, a timestamp, a score. */
 export function Datum({ children }: { children: React.ReactNode }) {
   return <span className={styles.datum}>{children}</span>;

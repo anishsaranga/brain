@@ -10,9 +10,12 @@ import {
   softDeleteConcept,
   restoreConcept,
   hardDeleteConcept,
+  setConceptFlags,
   isRelType,
   type RelType,
 } from "@/lib/graph";
+import { undoIngest, discardCapture } from "@/lib/ingest";
+import { recordReview, GRADES, type Grade } from "@/lib/fsrs";
 
 /**
  * Everything the explorer can change.
@@ -131,4 +134,92 @@ export async function destroyConcept(id: string, confirmName: string): Promise<A
   revalidatePath("/");
   revalidatePath("/trash");
   return { ok: true, message: `"${result.name}" is gone for good.` };
+}
+
+/* ── The maintenance surfaces ──────────────────────────────────────────── */
+
+/**
+ * Reverse one ingest batch.
+ *
+ * `undoIngest` is idempotent and tombstones rather than destroys, so this is
+ * safe to double-click and safe to regret: an undo issued by mistake leaves
+ * everything restorable from /trash.
+ */
+export async function undoBatch(batchId: string): Promise<ActionResult> {
+  await requireUser();
+  const result = await undoIngest(batchId);
+  if (!result.ok) return fail(result.note);
+
+  revalidatePath("/");
+  revalidatePath("/ingest");
+  revalidatePath(`/ingest/${batchId}`);
+  revalidatePath("/trash");
+  return { ok: true, message: result.note };
+}
+
+/**
+ * Drop a capture without extracting anything from it.
+ *
+ * Marks it processed rather than deleting it, consistent with everything
+ * else here: the text stays on the node behind a `discardedAt`.
+ */
+export async function discardInboxItem(id: string): Promise<ActionResult> {
+  await requireUser();
+  const { discarded } = await discardCapture(id);
+  revalidatePath("/inbox");
+  return discarded
+    ? { ok: true, message: "Discarded. It leaves the inbox but the text is kept." }
+    : fail("That capture is not in the inbox, or has already been processed.");
+}
+
+/** Grade a card. The scheduling itself lives in `recordReview`. */
+export async function gradeCard(id: string, grade: string): Promise<ActionResult> {
+  await requireUser();
+  if (!GRADES.includes(grade as Grade)) return fail(`Unknown grade "${grade}".`);
+
+  const result = await recordReview(id, grade as Grade);
+  if (!result.ok) return fail(result.reason);
+
+  revalidatePath("/review");
+  revalidatePath("/");
+  return {
+    ok: true,
+    message: result.replayed
+      ? "Already recorded."
+      : `Next in ${result.intervalDays} ${result.intervalDays === 1 ? "day" : "days"}.`,
+  };
+}
+
+/**
+ * Mark a note wrong, from inside a review.
+ *
+ * Getting something wrong because the stored note is wrong is not a failure
+ * of recall, and recording it as one would poison the schedule for a card
+ * whose real problem is its content. This flags the note instead, and
+ * /hygiene lists everything waiting to be fixed.
+ */
+export async function flagCard(id: string, note?: string): Promise<ActionResult> {
+  await requireUser();
+  const trimmed = note?.trim();
+  const ok = await setConceptFlags(id, {
+    flagged: true,
+    flagNote: trimmed ? trimmed : null,
+  });
+  if (!ok) return fail("No concept with that id.");
+
+  revalidatePath("/review");
+  revalidatePath("/hygiene");
+  revalidatePath(`/c/${id}`);
+  return { ok: true, message: "Flagged for a fix. It stays in the queue." };
+}
+
+/** Clear a flag once the note has been corrected. */
+export async function unflagConcept(id: string): Promise<ActionResult> {
+  await requireUser();
+  const ok = await setConceptFlags(id, { flagged: false, flagNote: null });
+  if (!ok) return fail("No concept with that id.");
+
+  revalidatePath("/hygiene");
+  revalidatePath(`/c/${id}`);
+  return { ok: true, message: "Flag cleared." };
 }

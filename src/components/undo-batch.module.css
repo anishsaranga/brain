@@ -1,0 +1,77 @@
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.button,
+.confirm {
+  flex: none;
+  padding: 0.35rem 0.8rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--step--1);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--fast) var(--ease),
+    opacity var(--fast) var(--ease);
+}
+
+.button {
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+  color: var(--muted);
+}
+
+.button:hover {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+  color: var(--danger);
+}
+
+.confirm {
+  border: 1px solid var(--danger);
+  background: var(--danger);
+  color: #ffffff;
+  animation: fade var(--fast) var(--ease);
+}
+
+.confirm:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.confirm:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.quiet {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--step--1);
+  cursor: pointer;
+  padding: 0.35rem 0.2rem;
+}
+
+.quiet:hover {
+  color: var(--fg);
+}
+
+.done {
+  color: var(--accent);
+  font-size: var(--step--1);
+  text-align: right;
+  max-width: 28ch;
+  line-height: 1.5;
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--step--1);
+  text-align: right;
+  max-width: 28ch;
+  line-height: 1.5;
+}

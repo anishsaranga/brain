@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { hybridSearch } from "@/lib/graph";
 import { excerpt } from "@/lib/markdown";
-import { Page, PageHeader, List, RowLink, Empty, Tag } from "@/components/ui";
+import { Page, PageHeader, List, RowLink, Empty, Tag, Sub } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -59,20 +59,7 @@ export default async function SearchPage({
               broken fragment of a document, and the raw source shows "##" and
               "**" as literal characters.
             */}
-            {r.body && (
-              <span
-                style={{
-                  display: "block",
-                  color: "var(--muted)",
-                  fontWeight: 400,
-                  fontSize: "var(--step--1)",
-                  lineHeight: 1.55,
-                  marginTop: "0.2rem",
-                }}
-              >
-                {excerpt(r.body, 200)}
-              </span>
-            )}
+            {r.body && <Sub>{excerpt(r.body, 200)}</Sub>}
           </RowLink>
         ))}
       </List>
