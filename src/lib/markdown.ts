@@ -35,7 +35,6 @@ export function safeHref(href?: string | null): string | undefined {
 
   // Control characters are stripped before parsing. `java\nscript:alert(1)`
   // is a real bypass: browsers ignore the newline, naive parsers do not.
-  // eslint-disable-next-line no-control-regex
   const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, "");
 
   // Fragment and root-relative links never carry a scheme.
@@ -100,8 +99,12 @@ export function plainText(markdown: string): string {
       .replace(/(\*\*|__)([^*_]+)\1/g, "$2")
       .replace(/(\*|_)([^*_]+)\1/g, "$2")
       .replace(/~~([^~]+)~~/g, "$1")
-      // Table pipes and alignment rows.
-      .replace(/^\s*\|?(?:\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?\s*$/gm, "")
+      // Table alignment rows, before the pipes they are made of are collapsed
+      // away. GFM accepts a single dash per column ("| - | - |"), so this
+      // cannot require two, and it must also handle tables written without
+      // outer pipes ("--- | ---"). Any line made only of dashes, colons,
+      // pipes and spaces is one: a real row has content in it.
+      .replace(/^[ \t]*[-:|][ \t:|-]*$/gm, "")
       .replace(/\s*\|\s*/g, " ")
       // Collapse the whitespace all of that left behind.
       .replace(/\s+/g, " ")

@@ -921,6 +921,60 @@ export async function unlinkedNeighbours(
   return findSimilar(vec, { excludeIds: exclude, limit, minScore: 0.5 });
 }
 
+/**
+ * Rename a concept, keyed on its id.
+ *
+ * This has to exist separately because `upsertConcept` identifies a concept
+ * by `nameLower` and nothing else. That is correct for ingest, where the name
+ * IS the identity and two conversations naming the same thing must converge
+ * on one node. It is wrong for an edit: calling it with a changed name
+ * created a second concept and left the original untouched, so the edit
+ * vanished and the graph quietly grew a duplicate.
+ *
+ * Case-only changes are handled too. `nameLower` does not move, but `name` is
+ * the display form and MERGE only sets it ON CREATE, so "raft" to "Raft"
+ * would otherwise be silently ignored.
+ */
+export async function renameConcept(
+  id: string,
+  newName: string,
+): Promise<{ renamed: boolean; reason?: string }> {
+  const name = newName.trim();
+  if (!name) return { renamed: false, reason: "A concept needs a name." };
+  const nameLower = name.toLocaleLowerCase();
+
+  const current = await read(
+    "MATCH (c:Concept {id: $id}) RETURN c.name AS name, c.nameLower AS lower",
+    { id },
+  );
+  const row = current.records[0];
+  if (!row) return { renamed: false, reason: "No concept with that id." };
+  if (String(row.get("name")) === name) return { renamed: true };
+
+  // The uniqueness constraint on nameLower would reject this anyway, but as a
+  // raw Neo4j error rather than something worth showing anyone.
+  if (String(row.get("lower")) !== nameLower) {
+    const clash = await read(
+      "MATCH (c:Concept {nameLower: $nameLower}) RETURN c.id AS id",
+      { nameLower },
+    );
+    const other = clash.records[0];
+    if (other && String(other.get("id")) !== id) {
+      return {
+        renamed: false,
+        reason: `"${name}" already exists. Names are the identity here, so two concepts cannot share one.`,
+      };
+    }
+  }
+
+  await write(
+    `MATCH (c:Concept {id: $id})
+     SET c.name = $name, c.nameLower = $nameLower, c.updatedAt = datetime()`,
+    { id, name, nameLower },
+  );
+  return { renamed: true };
+}
+
 export interface NavCounts {
   inbox: number;
   due: number;

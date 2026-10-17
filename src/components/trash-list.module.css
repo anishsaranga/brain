@@ -1,0 +1,187 @@
+.ok,
+.bad {
+  margin: 0 0 var(--s4);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  font-size: var(--step--1);
+}
+
+.ok {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.bad {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s3);
+}
+
+.item {
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+
+.name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.when {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+
+.restore {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--step--1);
+  cursor: pointer;
+  transition:
+    border-color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+
+.restore:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.quiet {
+  padding: 0.3rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-size: var(--step--1);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease);
+}
+
+.quiet:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.restore:disabled,
+.quiet:disabled,
+.destroy:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── The confirmation ─────────────────────────────────────────────────────── */
+
+.confirm {
+  margin-top: var(--s3);
+  padding: var(--s3) var(--s4);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+  border-radius: var(--radius);
+  background: var(--danger-wash);
+  animation: fade var(--base) var(--ease);
+}
+
+.impact {
+  margin: 0 0 var(--s3);
+  color: var(--muted);
+  font-size: var(--step--1);
+  line-height: 1.65;
+}
+
+.impact strong {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.rel {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  opacity: 0.85;
+}
+
+.confirmLabel {
+  display: block;
+  margin-bottom: var(--s2);
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+.confirmLabel strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.confirmRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+.input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--step-0);
+}
+
+.input:focus {
+  border-color: var(--danger);
+}
+
+.destroy {
+  flex: none;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger);
+  color: #ffffff;
+  font-size: var(--step--1);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--fast) var(--ease);
+}
+
+.destroy:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* Disabled is the default state here, so it must not look broken: the button
+   reads as unavailable until the name is typed, rather than as an error. */
+.destroy:disabled {
+  background: none;
+  color: var(--danger);
+  opacity: 0.55;
+}

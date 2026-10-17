@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import styles from "./theme-toggle.module.css";
 
 type Choice = "system" | "light" | "dark";
 
 export const THEME_KEY = "brain-theme";
+
+/**
+ * Fired whenever the theme changes in this tab.
+ *
+ * The `storage` event only reaches OTHER tabs, so something same-tab is
+ * needed as well. The graph canvas listens for this too: Cytoscape resolves
+ * the palette once when it mounts and cannot see a custom property change,
+ * so without a nudge it keeps the old colours until it is remounted.
+ */
+export const THEME_EVENT = "brain:themechange";
 
 /**
  * The inline script that runs before first paint.
@@ -14,9 +24,8 @@ export const THEME_KEY = "brain-theme";
  * of React, or the page renders in the system theme for a frame and then
  * snaps to the stored one. Everyone has seen that flash and it looks broken.
  *
- * Kept deliberately tiny and wrapped in try/catch: localStorage throws in a
- * private window with site data blocked, and a theme preference is not worth
- * a blank page.
+ * Wrapped in try/catch: localStorage throws in a private window with site
+ * data blocked, and a theme preference is not worth a blank page.
  */
 export const themeScript = `
 try {
@@ -28,52 +37,71 @@ try {
 `.trim();
 
 /**
+ * The document element is the source of truth, not React state.
+ *
+ * The inline script above has already set the attribute by the time this
+ * mounts, so reading it back is both correct and avoids the
+ * read-storage-then-setState-in-an-effect pattern. `storage` keeps other
+ * tabs in step.
+ */
+function subscribe(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(THEME_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(THEME_EVENT, onChange);
+  };
+}
+
+function getSnapshot(): Choice {
+  const value = document.documentElement.getAttribute("data-theme");
+  return value === "light" || value === "dark" ? value : "system";
+}
+
+/** No document on the server, and no stored preference to read. */
+function getServerSnapshot(): Choice {
+  return "system";
+}
+
+const ORDER: Choice[] = ["system", "light", "dark"];
+const LABEL: Record<Choice, string> = {
+  system: "Match system",
+  light: "Light",
+  dark: "Dark",
+};
+
+/**
  * Three states, not two. "System" is a real choice and the default, so the
  * app follows the OS at night without anyone having to remember to switch.
  */
 export default function ThemeToggle() {
-  const [choice, setChoice] = useState<Choice>("system");
-
-  // The attribute is already correct when this mounts, courtesy of the script
-  // above. This only syncs the control to it.
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(THEME_KEY);
-      if (stored === "light" || stored === "dark") setChoice(stored);
-    } catch {
-      // Unreadable storage just means the control starts on "system".
-    }
-  }, []);
+  const choice = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const apply = (next: Choice) => {
-    setChoice(next);
     const root = document.documentElement;
-    if (next === "system") {
-      root.removeAttribute("data-theme");
-    } else {
-      root.setAttribute("data-theme", next);
-    }
+    if (next === "system") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", next);
+
     try {
       if (next === "system") localStorage.removeItem(THEME_KEY);
       else localStorage.setItem(THEME_KEY, next);
     } catch {
       // The theme still applies for this page; it just will not persist.
     }
-  };
 
-  const order: Choice[] = ["system", "light", "dark"];
-  const label = { system: "Match system", light: "Light", dark: "Dark" };
+    window.dispatchEvent(new Event(THEME_EVENT));
+  };
 
   return (
     <button
       type="button"
       className={styles.toggle}
-      // The control is a single button that cycles, because a three-way
-      // segmented control is a lot of chrome for something touched twice a
-      // year. The title carries the full state for anyone who wonders.
-      title={`Theme: ${label[choice].toLowerCase()}. Click to change.`}
-      aria-label={`Theme: ${label[choice]}. Click to change.`}
-      onClick={() => apply(order[(order.indexOf(choice) + 1) % order.length])}
+      // A single cycling button, because a three-way segmented control is a
+      // lot of chrome for something touched twice a year. The label carries
+      // the full state for anyone who wonders.
+      title={`Theme: ${LABEL[choice].toLowerCase()}. Click to change.`}
+      aria-label={`Theme: ${LABEL[choice]}. Click to change.`}
+      onClick={() => apply(ORDER[(ORDER.indexOf(choice) + 1) % ORDER.length])}
     >
       <Glyph choice={choice} />
     </button>

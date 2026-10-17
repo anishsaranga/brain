@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { untrashConcept, destroyConcept, type ActionResult } from "@/app/actions";
 import { relLabel } from "@/lib/rel-types";
+import styles from "./trash-list.module.css";
 
 interface TrashItem {
   id: string;
@@ -13,6 +14,13 @@ interface TrashItem {
   severs: Array<{ id: string; name: string; type: string }>;
 }
 
+/**
+ * Restore, and the one irreversible action in the system.
+ *
+ * Destroying shows what it breaks before it offers the control that does it.
+ * The note is one paragraph you could rewrite; the connections to it are the
+ * thinking you cannot.
+ */
 export default function TrashList({ items }: { items: TrashItem[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -31,130 +39,106 @@ export default function TrashList({ items }: { items: TrashItem[] }) {
   return (
     <>
       {result && (
-        <p
-          role="status"
-          style={{
-            fontSize: "0.85rem",
-            color: result.ok ? "var(--muted)" : "#d4453d",
-            marginBottom: "1rem",
-          }}
-        >
+        <p role="status" className={result.ok ? styles.ok : styles.bad}>
           {result.ok ? result.message : result.error}
         </p>
       )}
 
-      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.6rem" }}>
-        {items.map((item) => (
+      <ul className={`${styles.list} stagger`}>
+        {items.map((item, i) => (
           <li
             key={item.id}
-            style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "0.7rem 0.9rem" }}
+            className={styles.item}
+            style={{ "--i": Math.min(i, 14) } as React.CSSProperties}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "baseline" }}>
-              <strong>{item.name}</strong>
-              <span style={muted}>deleted {item.deletedAt.slice(0, 10)}</span>
+            <div className={styles.head}>
+              <strong className={styles.name}>{item.name}</strong>
+              <span className={styles.when}>
+                {item.edges > 0 && (
+                  <>
+                    {item.edges} {item.edges === 1 ? "link" : "links"} kept ·{" "}
+                  </>
+                )}
+                deleted <time dateTime={item.deletedAt}>{item.deletedAt.slice(0, 10)}</time>
+              </span>
             </div>
 
             {confirming === item.id ? (
-              <div style={{ marginTop: "0.7rem" }}>
-                {/* The consequences, before the control that causes them. The
-                    note is one paragraph you could rewrite; the connections
-                    to it are the thinking you cannot. */}
+              <div className={styles.confirm}>
                 {item.severs.length > 0 ? (
-                  <p style={{ ...muted, lineHeight: 1.6, margin: "0 0 0.5rem" }}>
+                  <p className={styles.impact}>
                     This also destroys {item.severs.length}{" "}
                     {item.severs.length === 1 ? "link" : "links"}, leaving{" "}
-                    {item.severs.map((s, i) => (
+                    {item.severs.map((s, idx) => (
                       <span key={s.id}>
-                        {i > 0 && ", "}
-                        <strong style={{ color: "var(--fg)", fontWeight: 500 }}>{s.name}</strong>{" "}
-                        <span style={{ opacity: 0.8 }}>({relLabel(s.type)})</span>
+                        {idx > 0 && ", "}
+                        <strong>{s.name}</strong>{" "}
+                        <span className={styles.rel}>({relLabel(s.type)})</span>
                       </span>
                     ))}{" "}
                     without it.
                   </p>
                 ) : (
-                  <p style={{ ...muted, margin: "0 0 0.5rem" }}>
+                  <p className={styles.impact}>
                     Nothing links to this, so nothing else changes.
                   </p>
                 )}
 
-                <label style={{ display: "block", ...muted, marginBottom: "0.35rem" }}>
-                  Type <strong style={{ color: "var(--fg)" }}>{item.name}</strong> to confirm.
+                <label className={styles.confirmLabel} htmlFor={`confirm-${item.id}`}>
+                  Type <strong>{item.name}</strong> to confirm.
                 </label>
-                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                <div className={styles.confirmRow}>
                   <input
+                    id={`confirm-${item.id}`}
                     value={typed}
                     onChange={(e) => setTyped(e.target.value)}
                     autoFocus
-                    style={{
-                      flex: 1,
-                      minWidth: 200,
-                      padding: "0.4rem 0.6rem",
-                      borderRadius: 8,
-                      border: "1px solid var(--line)",
-                      background: "var(--bg)",
-                      color: "var(--fg)",
-                      font: "inherit",
-                      fontSize: "0.9rem",
-                    }}
+                    autoComplete="off"
+                    className={styles.input}
                   />
                   <button
                     type="button"
-                    // The server checks this too — the guard cannot live only
+                    // The server checks this too. The guard cannot live only
                     // in a form, or a stray fetch would not have to pass it.
                     disabled={pending || typed.trim() !== item.name}
                     onClick={() => run(() => destroyConcept(item.id, typed))}
-                    style={{
-                      padding: "0.4rem 0.9rem",
-                      borderRadius: 8,
-                      border: "1px solid #d4453d",
-                      background: typed.trim() === item.name ? "#d4453d" : "transparent",
-                      color: typed.trim() === item.name ? "#fff" : "#d4453d",
-                      font: "inherit",
-                      fontSize: "0.85rem",
-                      cursor: typed.trim() === item.name ? "pointer" : "not-allowed",
-                    }}
+                    className={styles.destroy}
                   >
-                    Destroy permanently
+                    {pending ? "Destroying…" : "Destroy permanently"}
                   </button>
                   <button
                     type="button"
+                    className={styles.quiet}
                     onClick={() => {
                       setConfirming(null);
                       setTyped("");
                     }}
-                    style={linkButton}
                   >
-                    cancel
+                    Cancel
                   </button>
                 </div>
               </div>
             ) : (
-              <div style={{ display: "flex", gap: "0.9rem", marginTop: "0.5rem", alignItems: "center" }}>
+              <div className={styles.actions}>
                 <button
                   type="button"
                   disabled={pending}
+                  className={styles.restore}
                   onClick={() => run(() => untrashConcept(item.id))}
-                  style={linkButton}
                 >
-                  restore
+                  Restore
                 </button>
                 <button
                   type="button"
                   disabled={pending}
+                  className={styles.quiet}
                   onClick={() => {
                     setConfirming(item.id);
                     setTyped("");
                   }}
-                  style={{ ...linkButton, color: "#d4453d" }}
                 >
-                  destroy permanently
+                  Destroy permanently
                 </button>
-                {item.edges > 0 && (
-                  <span style={muted}>
-                    {item.edges} {item.edges === 1 ? "link" : "links"} attached
-                  </span>
-                )}
               </div>
             )}
           </li>
@@ -163,14 +147,3 @@ export default function TrashList({ items }: { items: TrashItem[] }) {
     </>
   );
 }
-
-const muted: React.CSSProperties = { color: "var(--muted)", fontSize: "0.8rem" };
-const linkButton: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  color: "var(--muted)",
-  font: "inherit",
-  fontSize: "0.8rem",
-  cursor: "pointer",
-  padding: 0,
-};

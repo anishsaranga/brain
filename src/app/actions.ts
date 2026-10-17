@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import {
   upsertConcept,
+  renameConcept,
   linkConcepts,
   unlinkConcepts,
   softDeleteConcept,
@@ -35,6 +36,16 @@ export async function saveConcept(
   await requireUser();
   const name = patch.name?.trim();
   if (!name) return fail("A concept needs a name.");
+
+  // Rename FIRST, keyed on the id.
+  //
+  // `upsertConcept` finds a concept by `nameLower` and ignores any id, so
+  // passing it a changed name used to MERGE a brand new concept and leave
+  // the original sitting there untouched: the edit disappeared and the graph
+  // grew a silent duplicate. Moving the node to its new name first means the
+  // upsert below then matches the concept actually being edited.
+  const renamed = await renameConcept(id, name);
+  if (!renamed.renamed) return fail(renamed.reason ?? "Could not rename that concept.");
 
   // `upsertConcept` REPLACES a supplied body, which is right here: this is a
   // deliberate edit, and the superseded version is kept as a revision. That

@@ -1,0 +1,299 @@
+.wrap {
+  display: grid;
+  gap: var(--s5);
+}
+
+/* ── Status ───────────────────────────────────────────────────────────────── */
+
+.ok,
+.bad {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  font-size: var(--step--1);
+  animation: fade var(--base) var(--ease);
+}
+
+.ok {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.bad {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+/* ── Header controls ──────────────────────────────────────────────────────── */
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.tab,
+.tabOn {
+  padding: 0.15rem 0.55rem;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: var(--step--1);
+  cursor: pointer;
+  transition:
+    background-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tabOn {
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+
+.quiet {
+  padding: 0.15rem 0.35rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-size: var(--step--1);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease);
+}
+
+.quiet:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.quiet:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* ── Form ─────────────────────────────────────────────────────────────────── */
+
+.form {
+  display: grid;
+  gap: var(--s4);
+}
+
+.field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s4);
+}
+
+@media (max-width: 640px) {
+  .pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+.label {
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-size: var(--step-0);
+  transition: border-color var(--fast) var(--ease);
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.textarea {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  line-height: 1.6;
+  resize: vertical;
+  min-height: 12rem;
+  tab-size: 2;
+}
+
+/* Matches the textarea's box so switching tabs does not shift the layout. */
+.previewPane {
+  min-height: 12rem;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  overflow-x: auto;
+}
+
+.placeholder {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--step-0);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: var(--step-0);
+  cursor: pointer;
+}
+
+.check input {
+  margin-top: 0.3em;
+  accent-color: var(--accent);
+}
+
+.checkHint {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+
+.actions > :global(p) {
+  margin: 0;
+}
+
+.primary {
+  flex: none;
+  padding: 0.45rem 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--step--1);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    opacity var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.primary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Links ────────────────────────────────────────────────────────────────── */
+
+.linkText {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: var(--step-0);
+}
+
+.rel {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.linkTarget {
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.linkTarget:hover {
+  color: var(--accent);
+}
+
+.addLink {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  flex-wrap: wrap;
+}
+
+.addLink .input {
+  width: auto;
+}
+
+.grow {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+/* ── Danger ───────────────────────────────────────────────────────────────── */
+
+.danger {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+}
+
+.danger > :global(p) {
+  margin: 0;
+}
+
+.dangerButton {
+  flex: none;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--danger);
+  font-size: var(--step--1);
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: var(--danger-wash);
+}
+
+.dangerButton:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}

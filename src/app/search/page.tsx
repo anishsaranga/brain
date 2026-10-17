@@ -1,7 +1,11 @@
-import Link from "next/link";
+import type { Metadata } from "next";
 import { hybridSearch } from "@/lib/graph";
+import { excerpt } from "@/lib/markdown";
+import { Page, PageHeader, List, RowLink, Empty, Tag } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "Search" };
 
 /**
  * Search, backed by the same `hybridSearch` the MCP tools use, so the UI and
@@ -19,60 +23,59 @@ export default async function SearchPage({
   const results = query ? await hybridSearch(query, 25) : [];
 
   return (
-    <main style={{ maxWidth: 820, margin: "0 auto", padding: "2rem 1.25rem" }}>
-      <h1 style={{ fontSize: "1.1rem", margin: "0 0 1rem" }}>
-        {query ? (
-          <>
-            {results.length} {results.length === 1 ? "result" : "results"} for{" "}
-            <span style={{ color: "var(--muted)" }}>{query}</span>
-          </>
-        ) : (
-          "Search"
-        )}
-      </h1>
+    <Page>
+      <PageHeader
+        title={query ? `“${query}”` : "Search"}
+        lead={
+          query
+            ? `${results.length} ${results.length === 1 ? "result" : "results"}`
+            : "Matches on wording and on meaning, so a half-remembered description works."
+        }
+      />
 
       {query && results.length === 0 && (
-        <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
-          Nothing matched. Both halves of the search — exact wording and
-          meaning — came back empty, so this is probably not in the graph yet.
-        </p>
+        <Empty>
+          Nothing matched. Both halves of the search came back empty, the exact
+          wording and the meaning, so this is probably not in the graph yet.
+        </Empty>
       )}
 
-      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
+      <List>
         {results.map((r) => (
-          <li key={r.id}>
-            <Link
-              href={`/c/${r.id}`}
-              style={{
-                display: "block",
-                padding: "0.6rem 0.8rem",
-                border: "1px solid var(--line)",
-                borderRadius: 8,
-                color: "var(--fg)",
-                textDecoration: "none",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem" }}>
-                <strong style={{ fontWeight: 600 }}>{r.name}</strong>
-                <span style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
-                  {r.sources.join(" + ")}
-                </span>
-              </div>
-              <p
+          <RowLink
+            key={r.id}
+            href={`/c/${r.id}`}
+            meta={
+              <>
+                {r.sources.map((s) => (
+                  <Tag key={s}>{s}</Tag>
+                ))}
+              </>
+            }
+          >
+            <span>{r.name}</span>
+            {/*
+              Flattened, not rendered. A 200-character slice of markdown is a
+              broken fragment of a document, and the raw source shows "##" and
+              "**" as literal characters.
+            */}
+            {r.body && (
+              <span
                 style={{
-                  margin: "0.3rem 0 0",
+                  display: "block",
                   color: "var(--muted)",
-                  fontSize: "0.85rem",
-                  lineHeight: 1.5,
+                  fontWeight: 400,
+                  fontSize: "var(--step--1)",
+                  lineHeight: 1.55,
+                  marginTop: "0.2rem",
                 }}
               >
-                {r.body.slice(0, 220)}
-                {r.body.length > 220 && "…"}
-              </p>
-            </Link>
-          </li>
+                {excerpt(r.body, 200)}
+              </span>
+            )}
+          </RowLink>
         ))}
-      </ul>
-    </main>
+      </List>
+    </Page>
   );
 }

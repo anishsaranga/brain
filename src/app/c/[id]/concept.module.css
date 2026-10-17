@@ -1,0 +1,190 @@
+.head {
+  margin-bottom: var(--s5);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.title {
+  font-size: var(--step-4);
+  letter-spacing: -0.025em;
+  margin: 0 0 var(--s3);
+  overflow-wrap: break-word;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.topic {
+  display: inline-flex;
+  padding: 0.14em 0.5em;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
+}
+
+.topic:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.aliases {
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+.flagNote {
+  margin: var(--s3) 0 0;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  background: var(--danger-wash);
+  color: var(--danger);
+  font-size: var(--step--1);
+  line-height: 1.55;
+}
+
+/*
+ * Note on the left, graph on the right, because the note is what you came
+ * for. The canvas sticks so it stays in view while a long note scrolls past
+ * it, which is the whole reason to put them side by side.
+ */
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--s6);
+  align-items: start;
+}
+
+.main {
+  min-width: 0;
+}
+
+.aside {
+  position: sticky;
+  top: calc(64px + var(--s4));
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s5);
+  }
+
+  /* Above the note on narrow screens: the graph is the orientation cue, and
+     burying it under a long note means nobody ever sees it on a phone. */
+  .aside {
+    position: static;
+    order: -1;
+  }
+}
+
+.asideHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+
+.asideTitle {
+  font-family: var(--sans);
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0;
+}
+
+.hops {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: var(--step--1);
+}
+
+.hop,
+.hopOn {
+  font-family: var(--mono);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  text-decoration: none;
+  transition:
+    color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+
+.hop {
+  color: var(--muted);
+}
+
+.hop:hover {
+  color: var(--fg);
+  background: var(--bg-sunken);
+}
+
+.hopOn {
+  color: var(--accent);
+  background: var(--accent-wash);
+  font-weight: 600;
+}
+
+.hopLabel {
+  color: var(--muted);
+  margin-left: 0.1rem;
+}
+
+.emptyGraph {
+  padding: var(--s4);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: var(--step--1);
+  line-height: 1.6;
+}
+
+/* ── Revisions ────────────────────────────────────────────────────────────── */
+
+.revisions {
+  margin-top: var(--s2);
+}
+
+.summary {
+  cursor: pointer;
+  font-size: var(--step--1);
+  color: var(--muted);
+  width: fit-content;
+}
+
+.summary:hover {
+  color: var(--fg);
+}
+
+.revision {
+  margin-top: var(--s3);
+  padding: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+
+.revisionDate {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0 0 var(--s3);
+}

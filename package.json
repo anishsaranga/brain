@@ -15,7 +15,8 @@
     "import:json": "node --env-file-if-exists=.env --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/alias-hook.mjs scripts/import-json.mjs",
     "tools:check": "docker compose -f docker-compose.test.yml run --rm brain-tools-check",
     "auth:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/alias-hook.mjs scripts/auth-check.mjs",
-    "explorer:check": "docker compose -f docker-compose.test.yml run --rm brain-explorer-check"
+    "explorer:check": "docker compose -f docker-compose.test.yml run --rm brain-explorer-check",
+    "markdown:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/alias-hook.mjs scripts/markdown-check.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",

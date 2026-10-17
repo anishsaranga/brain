@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { saveConcept, addLink, removeLink, trashConcept, type ActionResult } from "@/app/actions";
 import { REL_TYPES, relLabel } from "@/lib/rel-types";
+import Markdown from "./markdown";
+import styles from "./concept-editor.module.css";
+import ui from "./ui.module.css";
 
 interface Neighbour {
   id: string;
@@ -15,7 +18,7 @@ interface Neighbour {
  * Editing on the canvas.
  *
  * Nothing here is destructive. Saving keeps the superseded body as a
- * revision, and the delete button is a tombstone — permanent removal lives on
+ * revision, and the delete button is a tombstone: permanent removal lives on
  * /trash and takes a second deliberate step.
  */
 export default function ConceptEditor({
@@ -45,6 +48,7 @@ export default function ConceptEditor({
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
   const [editing, setEditing] = useState(false);
+  const [preview, setPreview] = useState(false);
 
   const [draft, setDraft] = useState({
     name,
@@ -67,81 +71,128 @@ export default function ConceptEditor({
   const direct = edges.filter((e) => e.from === id || e.to === id);
 
   return (
-    <section style={{ display: "grid", gap: "1.25rem" }}>
+    <div className={styles.wrap}>
       {result && (
-        <p
-          role="status"
-          style={{
-            margin: 0,
-            fontSize: "0.85rem",
-            color: result.ok ? "var(--muted)" : "#d4453d",
-          }}
-        >
+        <p role="status" className={result.ok ? styles.ok : styles.bad}>
           {result.ok ? result.message : result.error}
         </p>
       )}
 
-      {/* ── The note ───────────────────────────────────────────────────── */}
-      <div>
-        <div style={headerRow}>
-          <h2 style={h2}>Note</h2>
-          <button type="button" onClick={() => setEditing((v) => !v)} style={linkButton}>
-            {editing ? "Cancel" : "Edit"}
-          </button>
+      {/* ── The note ─────────────────────────────────────────────────────── */}
+      <section className={ui.section}>
+        <div className={ui.sectionHead}>
+          <h2 className={ui.sectionTitle}>Note</h2>
+          <div className={styles.headActions}>
+            {editing && (
+              <div className={styles.tabs} role="tablist" aria-label="Editor mode">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={!preview}
+                  className={!preview ? styles.tabOn : styles.tab}
+                  onClick={() => setPreview(false)}
+                >
+                  Write
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={preview}
+                  className={preview ? styles.tabOn : styles.tab}
+                  onClick={() => setPreview(true)}
+                >
+                  Preview
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setEditing((v) => !v);
+                setPreview(false);
+              }}
+              className={styles.quiet}
+            >
+              {editing ? "Cancel" : "Edit"}
+            </button>
+          </div>
         </div>
 
         {editing ? (
-          <div style={{ display: "grid", gap: "0.6rem" }}>
+          <div className={styles.form}>
             <Field label="Name">
               <input
                 value={draft.name}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                style={input}
+                className={styles.input}
               />
             </Field>
-            <Field label="Body (markdown)">
-              <textarea
-                value={draft.body}
-                onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-                rows={12}
-                style={{ ...input, fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}
-              />
+
+            <Field label="Body" hint="Markdown. Headings, lists, tables and code all render.">
+              {preview ? (
+                <div className={styles.previewPane}>
+                  {draft.body.trim() ? (
+                    <Markdown>{draft.body}</Markdown>
+                  ) : (
+                    <p className={styles.placeholder}>Nothing to preview yet.</p>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  value={draft.body}
+                  onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+                  rows={14}
+                  spellCheck
+                  className={`${styles.input} ${styles.textarea}`}
+                />
+              )}
             </Field>
-            <Field label="Review prompt (optional)">
+
+            <Field label="Review prompt" hint="Optional. Asked instead of the name during review.">
               <input
                 value={draft.prompt}
                 onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
-                placeholder="Question to show instead of the name"
-                style={input}
+                placeholder="Why does Raft need a majority?"
+                className={styles.input}
               />
             </Field>
-            <Field label="Aliases (comma separated)">
-              <input
-                value={draft.aliases}
-                onChange={(e) => setDraft({ ...draft, aliases: e.target.value })}
-                style={input}
-              />
-            </Field>
-            <Field label="Topics (comma separated)">
-              <input
-                value={draft.topics}
-                onChange={(e) => setDraft({ ...draft, topics: e.target.value })}
-                style={input}
-              />
-            </Field>
-            <label style={{ fontSize: "0.85rem", display: "flex", gap: "0.4rem", alignItems: "center" }}>
+
+            <div className={styles.pair}>
+              <Field label="Aliases" hint="Comma separated.">
+                <input
+                  value={draft.aliases}
+                  onChange={(e) => setDraft({ ...draft, aliases: e.target.value })}
+                  className={styles.input}
+                />
+              </Field>
+              <Field label="Topics" hint="Comma separated.">
+                <input
+                  value={draft.topics}
+                  onChange={(e) => setDraft({ ...draft, topics: e.target.value })}
+                  className={styles.input}
+                />
+              </Field>
+            </div>
+
+            <label className={styles.check}>
               <input
                 type="checkbox"
                 checked={draft.tracked}
                 onChange={(e) => setDraft({ ...draft, tracked: e.target.checked })}
               />
-              In spaced repetition
+              <span>
+                In spaced repetition
+                <span className={styles.checkHint}>
+                  Most notes are reference material you want to find, not memorise.
+                </span>
+              </span>
             </label>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+
+            <div className={styles.actions}>
               <button
                 type="button"
                 disabled={pending}
-                style={button}
+                className={styles.primary}
                 onClick={() =>
                   run(async () => {
                     const r = await saveConcept(id, {
@@ -159,81 +210,95 @@ export default function ConceptEditor({
               >
                 {pending ? "Saving…" : "Save"}
               </button>
-              <span style={{ ...muted, alignSelf: "center" }}>
-                The current version is kept and can be recovered.
-              </span>
+              <span className={ui.note}>The current version is kept and can be recovered.</span>
             </div>
           </div>
+        ) : body.trim() ? (
+          <Markdown>{body}</Markdown>
         ) : (
-          <pre style={bodyBlock}>{body || "No note yet."}</pre>
+          <p className={styles.placeholder}>No note yet.</p>
         )}
-      </div>
+      </section>
 
-      {/* ── Links ──────────────────────────────────────────────────────── */}
-      <div>
-        <h2 style={h2}>Links</h2>
+      {/* ── Links ────────────────────────────────────────────────────────── */}
+      <section className={ui.section}>
+        <div className={ui.sectionHead}>
+          <h2 className={ui.sectionTitle}>Links</h2>
+        </div>
+
         {direct.length === 0 ? (
-          <p style={muted}>None yet.</p>
+          <p className={styles.placeholder}>None yet.</p>
         ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: "0.4rem 0 0", display: "grid", gap: "0.3rem" }}>
-            {direct.map((e) => {
+          <ul className={`${ui.list} stagger`}>
+            {direct.map((e, i) => {
               const otherId = e.from === id ? e.to : e.from;
               return (
-                <li key={`${e.from}-${e.to}-${relLabel(e.type)}`} style={linkRow}>
-                  <span style={{ fontSize: "0.85rem" }}>
-                    <span style={muted}>
-                      {e.from === id ? "" : `${nameOf(otherId)} `}
-                      {relLabel(e.type)}
-                      {e.from === id ? " " : ""}
+                <li
+                  key={`${e.from}-${e.to}-${e.type}`}
+                  style={{ "--i": Math.min(i, 14) } as React.CSSProperties}
+                >
+                  <div className={ui.row}>
+                    <span className={styles.linkText}>
+                      <span className={styles.rel}>{relLabel(e.type)}</span>
+                      <Link href={`/c/${otherId}`} className={styles.linkTarget}>
+                        {e.from === id ? nameOf(otherId) : nameOf(otherId)}
+                      </Link>
+                      {e.from !== id && <span className={styles.rel}>this</span>}
                     </span>
-                    <Link href={`/c/${otherId}`} style={{ color: "var(--fg)" }}>
-                      {e.from === id ? nameOf(otherId) : "this"}
-                    </Link>
-                  </span>
-                  <button
-                    type="button"
-                    disabled={pending}
-                    style={linkButton}
-                    onClick={() => run(() => removeLink(e.from, e.to, e.type))}
-                  >
-                    remove
-                  </button>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      className={styles.quiet}
+                      onClick={() => run(() => removeLink(e.from, e.to, e.type))}
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </li>
               );
             })}
           </ul>
         )}
 
-        <AddLink id={id} candidates={[...suggestions, ...neighbours.map((n) => ({ ...n, score: 0 }))]} pending={pending} onRun={run} />
-      </div>
+        <AddLink
+          id={id}
+          candidates={[...suggestions, ...neighbours.map((n) => ({ ...n, score: 0 }))]}
+          pending={pending}
+          onRun={run}
+        />
+      </section>
 
-      {/* ── Suggestions ────────────────────────────────────────────────── */}
+      {/* ── Suggestions ──────────────────────────────────────────────────── */}
       {suggestions.length > 0 && (
-        <div>
-          <h2 style={h2}>Might be related</h2>
-          <p style={muted}>
+        <section className={ui.section}>
+          <div className={ui.sectionHead}>
+            <h2 className={ui.sectionTitle}>Might be related</h2>
+          </div>
+          <p className={ui.note}>
             Near this one but not linked. Each conversation is blind to the
             others, so these are the connections nothing has made yet.
           </p>
-          <ul style={{ listStyle: "none", padding: 0, margin: "0.4rem 0 0", display: "grid", gap: "0.3rem" }}>
-            {suggestions.map((s) => (
-              <li key={s.id} style={linkRow}>
-                <Link href={`/c/${s.id}`} style={{ color: "var(--fg)", fontSize: "0.85rem" }}>
-                  {s.name}
-                </Link>
-                <span style={muted}>{s.score.toFixed(2)}</span>
+          <ul className={`${ui.list} stagger`} style={{ marginTop: "0.6rem" }}>
+            {suggestions.map((s, i) => (
+              <li key={s.id} style={{ "--i": Math.min(i, 14) } as React.CSSProperties}>
+                <div className={ui.row}>
+                  <Link href={`/c/${s.id}`} className={styles.linkTarget}>
+                    {s.name}
+                  </Link>
+                  <span className={ui.datum}>{s.score.toFixed(2)}</span>
+                </div>
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       )}
 
-      {/* ── Delete ─────────────────────────────────────────────────────── */}
-      <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.9rem" }}>
+      {/* ── Delete ───────────────────────────────────────────────────────── */}
+      <div className={styles.danger}>
         <button
           type="button"
           disabled={pending}
-          style={{ ...linkButton, color: "#d4453d" }}
+          className={styles.dangerButton}
           onClick={() =>
             run(async () => {
               const r = await trashConcept(id);
@@ -244,12 +309,12 @@ export default function ConceptEditor({
         >
           Move to trash
         </button>
-        <span style={{ ...muted, marginLeft: "0.6rem" }}>
-          Reversible. Links survive. Permanent removal is a separate step on
-          the trash page.
+        <span className={ui.note}>
+          Reversible. Links survive. Permanent removal is a separate step on the
+          trash page.
         </span>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -273,15 +338,25 @@ function AddLink({
   if (unique.length === 0) return null;
 
   return (
-    <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.6rem", flexWrap: "wrap" }}>
-      <select value={type} onChange={(e) => setType(e.target.value)} style={{ ...input, width: "auto" }}>
+    <div className={styles.addLink}>
+      <select
+        value={type}
+        onChange={(e) => setType(e.target.value)}
+        className={styles.input}
+        aria-label="Relationship"
+      >
         {REL_TYPES.map((t) => (
           <option key={t} value={t}>
             {relLabel(t)}
           </option>
         ))}
       </select>
-      <select value={target} onChange={(e) => setTarget(e.target.value)} style={{ ...input, width: "auto", flex: 1 }}>
+      <select
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+        className={`${styles.input} ${styles.grow}`}
+        aria-label="Concept to link"
+      >
         <option value="">choose a concept…</option>
         {unique.map((c) => (
           <option key={c.id} value={c.id}>
@@ -292,7 +367,7 @@ function AddLink({
       <button
         type="button"
         disabled={pending || !target}
-        style={button}
+        className={styles.primary}
         onClick={() => onRun(() => addLink(id, target, type))}
       >
         Link
@@ -301,77 +376,26 @@ function AddLink({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <label style={{ display: "grid", gap: "0.2rem" }}>
-      <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>{label}</span>
+    <label className={styles.field}>
+      <span className={styles.label}>{label}</span>
       {children}
+      {hint && <span className={styles.hint}>{hint}</span>}
     </label>
   );
 }
 
 const splitList = (value: string) =>
-  value.split(",").map((s) => s.trim()).filter(Boolean);
-
-const h2: React.CSSProperties = {
-  fontSize: "0.8rem",
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-  color: "var(--muted)",
-  margin: 0,
-};
-const headerRow: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "baseline",
-  marginBottom: "0.4rem",
-};
-const muted: React.CSSProperties = { color: "var(--muted)", fontSize: "0.8rem" };
-const input: React.CSSProperties = {
-  width: "100%",
-  padding: "0.45rem 0.6rem",
-  borderRadius: 8,
-  border: "1px solid var(--line)",
-  background: "var(--bg)",
-  color: "var(--fg)",
-  font: "inherit",
-  fontSize: "0.9rem",
-};
-const button: React.CSSProperties = {
-  padding: "0.45rem 0.9rem",
-  borderRadius: 8,
-  border: "1px solid var(--line)",
-  background: "var(--fg)",
-  color: "var(--bg)",
-  font: "inherit",
-  fontSize: "0.85rem",
-  cursor: "pointer",
-};
-const linkButton: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  color: "var(--muted)",
-  font: "inherit",
-  fontSize: "0.8rem",
-  cursor: "pointer",
-  padding: 0,
-};
-const linkRow: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "1rem",
-  padding: "0.4rem 0.6rem",
-  border: "1px solid var(--line)",
-  borderRadius: 8,
-};
-const bodyBlock: React.CSSProperties = {
-  whiteSpace: "pre-wrap",
-  fontFamily: "inherit",
-  fontSize: "0.92rem",
-  lineHeight: 1.6,
-  margin: "0.4rem 0 0",
-  padding: "0.8rem",
-  border: "1px solid var(--line)",
-  borderRadius: 8,
-};
+  value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);

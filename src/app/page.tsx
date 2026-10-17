@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { topicOverview, recentConcepts, graphStats } from "@/lib/graph";
 import { dueForReview } from "@/lib/fsrs";
+import { Page, PageHeader, Section, Stats, Stat, List, RowLink, Empty, Tag, When } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -22,115 +22,116 @@ export default async function Home() {
 
   if (stats.concepts === 0) {
     return (
-      <main style={page}>
-        <h1 style={h1}>Nothing here yet</h1>
-        <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
-          Your graph is empty. In a Claude conversation with the <code>brain</code>{" "}
-          connector enabled, say <em>&ldquo;add this to my knowledge graph&rdquo;</em>, or
-          use the <strong>Ingest this conversation</strong> prompt, which carries the
-          house rules for granularity and linking.
-        </p>
-      </main>
+      <Page width="read">
+        <PageHeader
+          title="Nothing here yet"
+          lead="This fills up from Claude, not from here. There is no new-note button on purpose."
+        />
+        <Empty>
+          <p style={{ marginTop: 0 }}>
+            In a Claude conversation with the <strong>brain</strong> connector enabled,
+            say <em>&ldquo;add this to my knowledge graph&rdquo;</em>, or run the{" "}
+            <strong>Ingest this conversation</strong> prompt, which carries the house
+            rules for granularity and linking.
+          </p>
+          <p style={{ marginBottom: 0 }}>
+            To save something now and sort it out later, say{" "}
+            <em>&ldquo;capture this&rdquo;</em>. It lands in the inbox as raw text and
+            waits for you.
+          </p>
+        </Empty>
+      </Page>
     );
   }
 
   return (
-    <main style={page}>
-      <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginBottom: "2rem" }}>
+    <Page>
+      <PageHeader
+        title="Overview"
+        lead="What is in the graph, and where it needs attention."
+      />
+
+      <Stats>
         <Stat label="concepts" value={stats.concepts} />
         <Stat label="links" value={stats.edges} />
-        {/* No link yet: the review session is milestone 6. */}
-        <Stat label="due now" value={due.totalDue} />
-        <Stat label="orphans" value={stats.orphans} hint="one link or none" />
-        {stats.flagged > 0 && <Stat label="flagged" value={stats.flagged} />}
-      </div>
-
-      <section style={{ marginBottom: "2.5rem" }}>
-        <h2 style={h2}>Topics</h2>
-        {topics.length === 0 ? (
-          <p style={muted}>
-            Nothing is filed under a topic yet. Topics come from the{" "}
-            <code>topics</code> field when concepts are written.
-          </p>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.4rem" }}>
-            {topics.map((t) => (
-              <li key={t.name}>
-                <Link href={`/topic/${encodeURIComponent(t.name)}`} style={rowLink}>
-                  <span>{t.name}</span>
-                  <span style={muted}>
-                    {t.concepts} {t.concepts === 1 ? "concept" : "concepts"}
-                    {t.tracked > 0 && ` · ${t.tracked} tracked`}
-                  </span>
-                </Link>
-              </li>
-            ))}
-            {untopiced > 0 && (
-              <li style={{ ...muted, padding: "0.4rem 0" }}>
-                and {untopiced} with no topic
-              </li>
-            )}
-          </ul>
+        <Stat
+          label="due now"
+          value={due.totalDue}
+          href="/review"
+          tone={due.totalDue > 0 ? "accent" : undefined}
+        />
+        <Stat
+          label="orphans"
+          value={stats.orphans}
+          href="/hygiene"
+          title="One link or none. An unconnected note is a folder with extra steps."
+        />
+        {stats.flagged > 0 && (
+          <Stat label="flagged" value={stats.flagged} href="/hygiene" tone="danger" />
         )}
-      </section>
+      </Stats>
 
-      <section>
-        <h2 style={h2}>Recently changed</h2>
-        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.4rem" }}>
+      <Section title="Topics">
+        {topics.length === 0 ? (
+          <Empty>
+            Nothing is filed under a topic yet. Topics come from the{" "}
+            <code>topics</code> field when concepts are written, so they appear as
+            soon as an ingest sets one.
+          </Empty>
+        ) : (
+          <List>
+            {[
+              ...topics.map((t) => (
+                <RowLink
+                  key={t.name}
+                  href={`/topic/${encodeURIComponent(t.name)}`}
+                  meta={
+                    <>
+                      {t.tracked > 0 && <Tag tone="accent">{t.tracked} tracked</Tag>}
+                      <span>
+                        {t.concepts} {t.concepts === 1 ? "concept" : "concepts"}
+                      </span>
+                    </>
+                  }
+                >
+                  {t.name}
+                </RowLink>
+              )),
+              ...(untopiced > 0
+                ? [
+                    <RowLink
+                      key="__untopiced"
+                      href="/hygiene"
+                      meta={`${untopiced} ${untopiced === 1 ? "concept" : "concepts"}`}
+                    >
+                      <span style={{ color: "var(--muted)" }}>No topic</span>
+                    </RowLink>,
+                  ]
+                : []),
+            ]}
+          </List>
+        )}
+      </Section>
+
+      <Section title="Recently changed">
+        <List>
           {recent.map((c) => (
-            <li key={c.id}>
-              <Link href={`/c/${c.id}`} style={rowLink}>
-                <span>{c.name}</span>
-                <span style={muted}>{c.topics.join(", ")}</span>
-              </Link>
-            </li>
+            <RowLink
+              key={c.id}
+              href={`/c/${c.id}`}
+              meta={
+                <>
+                  {c.flagged && <Tag tone="danger">flagged</Tag>}
+                  {c.topics.length > 0 && <span>{c.topics.join(", ")}</span>}
+                  <When iso={c.updatedAt} />
+                </>
+              }
+            >
+              {c.name}
+            </RowLink>
           ))}
-        </ul>
-      </section>
-    </main>
+        </List>
+      </Section>
+    </Page>
   );
 }
-
-function Stat({
-  label,
-  value,
-  hint,
-  href,
-}: {
-  label: string;
-  value: number;
-  hint?: string;
-  href?: string;
-}) {
-  const body = (
-    <>
-      <div style={{ fontSize: "1.6rem", lineHeight: 1 }}>{value}</div>
-      <div style={{ ...muted, fontSize: "0.8rem", marginTop: "0.2rem" }}>
-        {label}
-        {hint && <span title={hint}> ⓘ</span>}
-      </div>
-    </>
-  );
-  return href ? (
-    <Link href={href} style={{ textDecoration: "none", color: "inherit" }}>
-      {body}
-    </Link>
-  ) : (
-    <div>{body}</div>
-  );
-}
-
-const page: React.CSSProperties = { maxWidth: 820, margin: "0 auto", padding: "2.5rem 1.25rem" };
-const h1: React.CSSProperties = { fontSize: "1.4rem", margin: "0 0 0.75rem" };
-const h2: React.CSSProperties = { fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: "0 0 0.6rem" };
-const muted: React.CSSProperties = { color: "var(--muted)", fontSize: "0.85rem" };
-const rowLink: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: "1rem",
-  padding: "0.5rem 0.7rem",
-  border: "1px solid var(--line)",
-  borderRadius: 8,
-  color: "var(--fg)",
-  textDecoration: "none",
-};

@@ -1,0 +1,32 @@
+.shell {
+  display: grid;
+  place-items: center;
+  /* dvh, not vh: on iOS Safari the address bar makes vh taller than the
+     visible viewport, which pushes the card off-centre. */
+  min-height: 100dvh;
+  padding: var(--s5);
+}
+
+.card {
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+}
+
+.mark {
+  color: var(--accent);
+  margin-bottom: var(--s4);
+}
+
+.title {
+  font-size: var(--step-4);
+  letter-spacing: -0.03em;
+  margin: 0 0 var(--s2);
+}
+
+.lead {
+  margin: 0 0 var(--s5);
+  color: var(--muted);
+  font-size: var(--step-0);
+  line-height: 1.6;
+}
