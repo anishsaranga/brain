@@ -272,8 +272,14 @@ indistinguishable from a broken tunnel:**
 Fastest dev loop — no tunnel, no WAF in the way:
 
 ```bash
-claude mcp add --transport http brain http://localhost:9999/mcp/<MCP_PATH_SECRET>
+claude mcp add --transport http brain http://localhost:9999/mcp/<MCP_PATH_SECRET> \
+  --header "Authorization: Bearer <MCP_BEARER_TOKEN>"
 ```
+
+The header is **not optional** now that `MCP_REQUIRE_TOKEN=1`: a path-only
+URL gets the same 404 as a wrong secret. Check the flag name against
+`claude mcp add --help` — it has changed between versions, and the CLI is
+not currently installed on this box.
 
 Worth keeping permanently rather than only for development: it means knowledge
 from coding sessions lands in the same graph.
