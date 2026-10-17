@@ -7,6 +7,9 @@ build
 npm-debug.log*
 .env
 .env*.local
+# Timestamped .env backups from scripts/rotate-mcp-secrets.ps1. The ".env"
+# above is an exact match and does not cover these, and they hold old secrets.
+.env.bak-*
 next-env.d.ts
 tsconfig.tsbuildinfo
 .data

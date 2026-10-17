@@ -41,9 +41,17 @@ that stage-2 connector auth will need.
 ```powershell
 cd C:\SERVER_REPOS\brain
 Copy-Item .env.example .env
-# Fill in NEO4J_PASSWORD   (openssl rand -hex 20)
-#         MCP_PATH_SECRET  (openssl rand -hex 24)
-#     and MCP_BEARER_TOKEN (openssl rand -hex 32)
+# Fill in NEO4J_PASSWORD (openssl rand -hex 20)
+```
+
+`openssl` is not on PATH in a stock PowerShell here (Git ships one at
+`C:\Program Files\Git\usr\bin\openssl.exe` if you want it). For the two
+MCP secrets use the script instead, which generates them with a CSPRNG,
+writes them straight into `.env`, and never prints them — a secret you have
+pasted through a terminal is one you can no longer account for:
+
+```powershell
+powershell -File scripts/rotate-mcp-secrets.ps1
 ```
 
 **`NEO4J_AUTH` only applies on the first boot of an empty data volume.** Editing
@@ -220,10 +228,12 @@ redeploy.
 **Roll it out in two steps, because getting this wrong produces a 404 that is
 indistinguishable from a broken tunnel:**
 
-1. **Permissive.** Set `MCP_BEARER_TOKEN` in `.env`, leave
-   `MCP_REQUIRE_TOKEN` unset, recreate `brain-web`. The token is now compared
-   and reported but not required, so nothing you mistype in the dialog can
-   break anything.
+1. **Permissive.** `powershell -File scripts/rotate-mcp-secrets.ps1`, then
+   recreate `brain-web`. It leaves `MCP_REQUIRE_TOKEN` unset, so the token
+   is compared and reported but not required, and nothing you mistype in
+   the dialog can break anything. **Rotating the path secret changes the
+   connector URL**, so the existing connector stays broken until step 2 —
+   that is expected, not a fault to debug.
 2. Add the header, call `ping`, then load `https://<HOSTNAME>/api/health`
    **while logged in** and read `mcpAuth.lastAttempt`:
 
