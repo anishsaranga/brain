@@ -1,33 +1,75 @@
+/*
+ * The canvas fills whatever the page gives it, which on /graph is everything
+ * below the nav. No border and no radius: a frame around something that
+ * reaches every edge just draws attention to the edge.
+ */
 .frame {
   position: relative;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  flex: 1 1 auto;
+  min-height: 0;
   background: var(--bg-sunken);
   overflow: hidden;
-  /* Tall enough to be worth looking at, capped so the controls below stay
-     reachable without scrolling on a laptop. */
-  height: min(72dvh, 720px);
+  border-top: 1px solid var(--line);
 }
 
+/*
+ * Absolute fill rather than `height: 100%`.
+ *
+ * The frame's height comes from `flex: 1 1 auto`, and a percentage height
+ * resolves against a definite parent height, which a flex-basis:auto item
+ * does not reliably have. It computed to 0: Cytoscape mounted, laid out all
+ * 29 nodes, and drew them into a strip no pixels tall. Insetting against the
+ * already-positioned frame sidesteps the question entirely.
+ */
 .canvas {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
 }
 
 /* ── Overlays ─────────────────────────────────────────────────────────────── */
 
+/*
+ * One treatment for every floating panel, so they read as the same layer of
+ * instrument rather than three unrelated boxes.
+ */
+.hud,
+.legend,
+.control {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .hud,
+  .legend,
+  .control {
+    background: var(--bg);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .hud,
+  .legend,
+  .control {
+    background: var(--bg);
+    backdrop-filter: none;
+  }
+}
+
 .hud {
   position: absolute;
-  left: var(--s3);
-  bottom: var(--s3);
+  z-index: 2;
+  left: var(--s4);
+  bottom: var(--s4);
   display: grid;
   gap: 0.1rem;
-  max-width: calc(100% - 7rem);
+  max-width: min(60%, 24rem);
   padding: var(--s2) var(--s3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  /* Never swallow a click meant for a node underneath. */
   pointer-events: none;
+  animation: fade var(--base) var(--ease);
 }
 
 .hudName {
@@ -45,19 +87,62 @@
   font-variant-numeric: tabular-nums;
 }
 
+.legend {
+  position: absolute;
+  z-index: 2;
+  left: var(--s4);
+  top: var(--s4);
+  display: grid;
+  gap: 0.3rem;
+  list-style: none;
+  margin: 0;
+  padding: var(--s3);
+  max-width: min(45%, 15rem);
+  max-height: calc(100% - 8rem);
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.legendItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+
+.legendName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.legendCount {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
 .controls {
   position: absolute;
-  right: var(--s3);
-  top: var(--s3);
+  z-index: 2;
+  right: var(--s4);
+  top: var(--s4);
   display: flex;
   gap: var(--s2);
 }
 
 .control {
-  padding: 0.25rem 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  padding: 0.3rem 0.7rem;
   color: var(--muted);
   font-size: var(--step--1);
   cursor: pointer;
@@ -71,16 +156,51 @@
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
+/*
+ * On a phone the legend and the Fit button would sit side by side across a
+ * 375px strip and crowd the canvas they are annotating. The legend goes
+ * horizontal along the top instead, scrolling if there are more topics than
+ * fit, and the Fit button keeps its corner.
+ */
+@media (max-width: 640px) {
+  .legend {
+    display: flex;
+    gap: var(--s3);
+    right: calc(var(--s4) + 3.6rem);
+    max-width: none;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .legend::-webkit-scrollbar {
+    display: none;
+  }
+
+  .legendItem {
+    flex: none;
+  }
+
+  .legendName {
+    max-width: 7rem;
+  }
+
+  .hud {
+    max-width: calc(100% - 2 * var(--s4));
+  }
+}
+
 /* ── Loading and empty ────────────────────────────────────────────────────── */
 
 .skeleton,
 .state {
   display: grid;
   place-items: center;
-  height: min(72dvh, 720px);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  flex: 1 1 auto;
+  min-height: 0;
   background: var(--bg-sunken);
+  border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: var(--step-0);
   text-align: center;
@@ -107,44 +227,4 @@
   .skeletonText {
     animation: none;
   }
-}
-
-/* ── Legend ───────────────────────────────────────────────────────────────── */
-
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2) var(--s4);
-  list-style: none;
-  margin: var(--s4) 0 0;
-  padding: 0;
-}
-
-.legendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: var(--step--1);
-  color: var(--muted);
-}
-
-.swatch {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex: none;
-}
-
-.legendCount {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  opacity: 0.8;
-}
-
-.truncated {
-  margin: var(--s4) 0 0;
-  color: var(--muted);
-  font-size: var(--step--1);
-  line-height: 1.6;
-  max-width: 68ch;
 }

@@ -133,6 +133,27 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/*
+ * A column, so a page can ask for "whatever height is left".
+ *
+ * The graph wants to fill the screen below the nav, and the nav is not a
+ * fixed height: it wraps to three rows on a phone. Hardcoding an offset
+ * would be wrong on exactly the device where it matters most, so let flex
+ * work it out instead.
+ */
+body {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+body > main {
+  flex: 1 0 auto;
+  /* Without this a wide child can stretch the column past the viewport,
+     which is the same min-width:auto trap as everywhere else. */
+  min-width: 0;
+}
+
 h1,
 h2,
 h3,

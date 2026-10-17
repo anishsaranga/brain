@@ -8,13 +8,28 @@ import styles from "./login.module.css";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Sign in" };
+/**
+ * Whose brain this is.
+ *
+ * An env var with a real default rather than a hardcoded string, so the repo
+ * stays reusable, but the default is the actual owner because this is a
+ * personal instance served from a domain that already carries the name.
+ */
+const OWNER = process.env.SITE_OWNER?.trim() || "Anish Saranga";
+
+export const metadata: Metadata = {
+  title: "Sign in",
+  description: `${OWNER}'s second brain.`,
+};
 
 /**
  * Deliberately a server component: someone who is already signed in should
  * never be shown a login form. They were, because the layout renders the nav
  * for any session while this page rendered a "sign in" button underneath it,
  * a confusing combination that looked like the nav leaking onto a public page.
+ *
+ * This is also the only page a stranger ever sees, so it says what the thing
+ * is rather than only asking them to sign in.
  */
 export default async function LoginPage({
   searchParams,
@@ -34,14 +49,24 @@ export default async function LoginPage({
     <main className={styles.shell}>
       <div className={`${styles.card} fade-in`}>
         <Mark />
-        <h1 className={styles.title}>brain</h1>
-        <p className={styles.lead}>
-          A knowledge graph you feed from Claude, walk through, and revise over
-          time.
-        </p>
+
+        <h1 className={styles.title}>
+          <span className={styles.owner}>{OWNER}&rsquo;s</span>
+          <span className={styles.second}>second brain</span>
+        </h1>
+
+        <p className={styles.lead}>Notes that remember how they connect.</p>
+
         <Suspense fallback={null}>
           <SignIn />
         </Suspense>
+
+        {/*
+          The allowlist is the whole security boundary here, so saying so is
+          honest rather than decorative: anyone can complete the Google flow,
+          and exactly one address gets in.
+        */}
+        <p className={styles.footnote}>Private. One account.</p>
       </div>
     </main>
   );
@@ -53,8 +78,8 @@ function Mark() {
     <svg
       className={styles.mark}
       viewBox="0 0 32 32"
-      width="40"
-      height="40"
+      width="44"
+      height="44"
       aria-hidden="true"
       fill="none"
       stroke="currentColor"

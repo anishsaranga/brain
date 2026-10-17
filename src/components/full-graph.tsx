@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import cytoscape from "cytoscape";
 import fcose from "cytoscape-fcose";
-import { themeColors, watchTheme } from "@/lib/theme-colors";
+import { themeColors, watchTheme, isDarkTheme } from "@/lib/theme-colors";
 import styles from "./full-graph.module.css";
 
 cytoscape.use(fcose);
@@ -102,6 +102,10 @@ export default function FullGraph() {
   const [hovered, setHovered] = useState<Node | null>(null);
   const [showLabels, setShowLabels] = useState(false);
 
+  // The canvas resolves its palette at mount; the legend has to resolve the
+  // same one at render, or its swatches disagree with the dots they explain.
+  const isDark = useSyncExternalStore(watchTheme, isDarkTheme, () => false);
+
   // ── Fetch after mount, so the page shell paints first ────────────────────
   useEffect(() => {
     const controller = new AbortController();
@@ -149,7 +153,9 @@ export default function FullGraph() {
               id: n.id,
               label: n.name,
               color: hueToColor(n.topic ? topicHues.get(n.topic) : undefined, dark) ?? colors.muted,
-              size: Math.min(34, 8 + Math.sqrt(n.degree) * 5),
+              // Sized for a full-screen canvas: the old 8+sqrt*5 was tuned
+              // for a 720px box and left the dots looking incidental here.
+              size: Math.min(42, 11 + Math.sqrt(n.degree) * 6),
               flagged: n.flagged,
               tracked: n.tracked,
             },
@@ -179,7 +185,7 @@ export default function FullGraph() {
               "border-width": 1.5,
               "border-color": colors.bg,
               label: "data(label)",
-              "font-size": 10,
+              "font-size": 11,
               "font-family": "var(--font-sans), sans-serif",
               color: colors.fg,
               "text-valign": "bottom",
@@ -230,9 +236,14 @@ export default function FullGraph() {
           randomize: false,
           animate: false,
           quality: big ? "default" : "proof",
-          nodeRepulsion: 9000,
-          idealEdgeLength: 90,
-          nodeSeparation: 120,
+          // Tuned for a full-screen canvas. At the old boxed size these were
+          // 9000 / 90 / 120, which on a viewport-sized surface left a tight
+          // knot floating in the middle of a lot of nothing. More room
+          // deserves more spread: clusters separate instead of overlapping,
+          // and the shape of the graph becomes legible at a glance.
+          nodeRepulsion: 16000,
+          idealEdgeLength: 150,
+          nodeSeparation: 160,
           // Two isolated concepts landed 20px apart and their labels merged
           // into one unreadable word. Turning component packing off did not
           // help: with no edges there is nothing pulling them apart, so they
@@ -336,38 +347,12 @@ export default function FullGraph() {
     );
   }
 
+  // Every piece of chrome is overlaid on the canvas rather than stacked
+  // around it, so none of it takes height away from the thing you came to
+  // look at.
   return (
-    <>
-      <div className={styles.frame}>
-        <div ref={container} className={styles.canvas} />
-
-        <div className={styles.hud}>
-          {hovered ? (
-            <>
-              <strong className={styles.hudName}>{hovered.name}</strong>
-              <span className={styles.hudMeta}>
-                {hovered.topic ?? "no topic"} · {hovered.degree}{" "}
-                {hovered.degree === 1 ? "link" : "links"}
-              </span>
-            </>
-          ) : (
-            <span className={styles.hudMeta}>
-              {data.nodes.length} concepts · {data.edges.length} links
-              {!showLabels && " · zoom in for names"}
-            </span>
-          )}
-        </div>
-
-        <div className={styles.controls}>
-          <button
-            type="button"
-            className={styles.control}
-            onClick={() => cyRef.current?.fit(undefined, 40)}
-          >
-            Fit
-          </button>
-        </div>
-      </div>
+    <div className={styles.frame}>
+      <div ref={container} className={styles.canvas} />
 
       {legend.length > 0 && (
         <ul className={styles.legend}>
@@ -375,22 +360,51 @@ export default function FullGraph() {
             <li key={topic} className={styles.legendItem}>
               <span
                 className={styles.swatch}
-                style={{ background: hueToColor(topicHues.get(topic), false) ?? undefined }}
+                style={{
+                  background: hueToColor(topicHues.get(topic), isDark) ?? undefined,
+                }}
                 aria-hidden="true"
               />
-              {topic}
+              <span className={styles.legendName}>{topic}</span>
               <span className={styles.legendCount}>{count}</span>
             </li>
           ))}
         </ul>
       )}
 
-      {data.truncated && (
-        <p className={styles.truncated}>
-          Showing the {data.nodes.length} most connected of {data.total} concepts.
-          The cap keeps the canvas usable; the rest are reachable by search.
-        </p>
-      )}
-    </>
+      <div className={styles.controls}>
+        <button
+          type="button"
+          className={styles.control}
+          onClick={() => cyRef.current?.fit(undefined, 60)}
+        >
+          Fit
+        </button>
+      </div>
+
+      <div className={styles.hud}>
+        {hovered ? (
+          <>
+            <strong className={styles.hudName}>{hovered.name}</strong>
+            <span className={styles.hudMeta}>
+              {hovered.topic ?? "no topic"} · {hovered.degree}{" "}
+              {hovered.degree === 1 ? "link" : "links"} · click to open
+            </span>
+          </>
+        ) : (
+          <>
+            <span className={styles.hudMeta}>
+              {data.nodes.length} concepts · {data.edges.length} links
+              {!showLabels && " · zoom in for names"}
+            </span>
+            {data.truncated && (
+              <span className={styles.hudMeta}>
+                the {data.nodes.length} most connected of {data.total}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   );
 }

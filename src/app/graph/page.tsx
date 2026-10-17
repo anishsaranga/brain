@@ -1,13 +1,19 @@
 import type { Metadata } from "next";
 import dynamicImport from "next/dynamic";
-import { Page, PageHeader, Note } from "@/components/ui";
+import styles from "./graph.module.css";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Graph" };
 
 /**
- * The whole graph.
+ * The whole graph, filling the screen.
+ *
+ * Full bleed and full height on purpose: this is the one page whose content
+ * IS the page, and a canvas boxed inside an 1180px column with a paragraph
+ * underneath reads as an illustration rather than somewhere you work. The
+ * chrome that used to sit around it (title, counts, legend, caveats) is
+ * overlaid on the canvas instead, so none of it costs vertical space.
  *
  * Lazy in two separate senses, and both are needed:
  *
@@ -27,18 +33,8 @@ const FullGraph = dynamicImport(() => import("@/components/full-graph"));
 
 export default function GraphPage() {
   return (
-    <Page width="wide">
-      <PageHeader
-        title="Graph"
-        lead="Everything at once, coloured by topic and sized by how connected it is. Hover to isolate a concept's links, click to open it."
-      />
+    <main className={styles.shell}>
       <FullGraph />
-      <Note>
-        The layout is seeded from concept ids rather than randomised, so the
-        shape is the same every time you open it. That is the only reason a
-        picture like this is worth more than a list: you start to recognise
-        where things are.
-      </Note>
-    </Page>
+    </main>
   );
 }

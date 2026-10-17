@@ -1,0 +1,17 @@
+/*
+ * Full bleed. No max-width, no padding, no page header.
+ *
+ * `body` is a flex column and `main` is the growing item, so `flex: 1` here
+ * means "everything left below the nav", whatever height the nav happens to
+ * be. That matters on a phone, where it wraps to three rows.
+ */
+.shell {
+  display: flex;
+  flex-direction: column;
+  /* Beats the `flex: 1 0 auto` the base stylesheet gives every main, so this
+     one shrinks to the viewport instead of growing past it. */
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  max-width: none;
+}

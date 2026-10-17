@@ -71,6 +71,17 @@ function isDarkColor(value: string): boolean {
 }
 
 /**
+ * Is the page currently dark?
+ *
+ * Shaped for `useSyncExternalStore` alongside `watchTheme`, so a component
+ * that needs to pick a colour at render time (a legend swatch, say) stays in
+ * step with the canvas, which picks its own at mount.
+ */
+export function isDarkTheme(): boolean {
+  return themeColors(document.documentElement).isDark;
+}
+
+/**
  * Call `onChange` whenever the effective theme changes.
  *
  * Two sources, and both are needed: the toggle fires THEME_EVENT when the
