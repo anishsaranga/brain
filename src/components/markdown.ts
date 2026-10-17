@@ -44,6 +44,16 @@ export default function Markdown({ children }: { children: string }) {
         // default cannot quietly widen what is accepted.
         urlTransform: (url: string) => safeHref(url) ?? "",
         components: {
+          // A table is the one markdown element with an irreducible minimum
+          // width, so on a narrow screen it drags the whole page sideways
+          // unless it is given something to scroll inside.
+          table({ children: content }) {
+            return createElement(
+              "div",
+              { className: "table-scroll" },
+              createElement("table", null, content as ReactNode),
+            );
+          },
           a({ href, title, children: content }) {
             const safe = safeHref(href);
 

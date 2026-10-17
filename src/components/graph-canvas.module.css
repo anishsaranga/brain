@@ -1,6 +1,18 @@
 .canvas {
   width: 100%;
+  height: var(--canvas-h, 460px);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--bg-sunken);
+}
+
+/*
+ * On a phone the neighbourhood sits above the note, so a 460px canvas pushes
+ * the thing you actually came to read off the screen. A handful of nodes does
+ * not need that much room.
+ */
+@media (max-width: 640px) {
+  .canvas {
+    height: min(var(--canvas-h, 460px), 46dvh);
+  }
 }

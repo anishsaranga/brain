@@ -197,6 +197,34 @@ pre {
   line-height: 1.68;
   max-width: var(--measure);
   overflow-wrap: break-word;
+  /* A grid or flex item defaults to min-width:auto, which lets a wide child
+     push the whole column past the viewport instead of being constrained by
+     it. On a phone that showed up as the entire page scrolling sideways. */
+  min-width: 0;
+}
+
+/*
+ * Tables scroll rather than stretch.
+ *
+ * A table's min-content width is the sum of its columns and nothing makes it
+ * smaller, so `width: 100%` does not stop a four-column table from being
+ * wider than a phone. Left alone it dragged the article and then the page
+ * sideways. The wrapper is supplied by the markdown renderer.
+ */
+.prose .table-scroll {
+  overflow-x: auto;
+  margin: 0 0 0.9em;
+  /* Hairlines at the edges hint that there is more to the right. */
+  background:
+    linear-gradient(to right, var(--bg), transparent) left / 18px 100% no-repeat,
+    linear-gradient(to left, var(--bg), transparent) right / 18px 100% no-repeat;
+}
+
+.prose .table-scroll table {
+  margin: 0;
+  /* Shrink-to-fit inside the scroller, but never below what the text needs. */
+  min-width: 100%;
+  width: auto;
 }
 
 .prose > :first-child {
@@ -328,6 +356,49 @@ pre {
 .prose li:has(> input[type="checkbox"]) {
   list-style: none;
   margin-left: -1.25em;
+}
+
+/* ── Touch targets ────────────────────────────────────────────────────────── */
+/*
+ * The desktop layout is deliberately dense, and a 23px high button is
+ * perfectly good with a mouse. It is a poor target for a thumb: the audit
+ * found nav links at 28px and the editor's Write/Preview tabs at 23px,
+ * against the ~44px that both Apple and Google ask for.
+ *
+ * Rather than inflate every control everywhere and lose the density that
+ * makes this readable on a laptop, grow them only where the primary input is
+ * coarse. `pointer: coarse` is the right query here rather than a width
+ * breakpoint: it describes the finger, not the screen, so a touch laptop
+ * gets comfortable targets and a narrow desktop window does not get fat ones.
+ */
+@media (pointer: coarse) {
+  button,
+  select,
+  summary,
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea {
+    min-height: 40px;
+  }
+
+  /* Links only where they are chrome. An inline link inside a paragraph of
+     prose must keep its line height, or the text it sits in comes apart. */
+  header a,
+  nav a {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* A 13px checkbox is unhittable. */
+  input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* The textarea's min-height is set by its own rule; do not shrink it. */
+  textarea {
+    min-height: 12rem;
+  }
 }
 
 /* ── Motion ───────────────────────────────────────────────────────────────── */

@@ -25,6 +25,7 @@
 }
 
 .item {
+  min-width: 0;
   padding: var(--s3) var(--s4);
   border: 1px solid var(--line);
   border-radius: var(--radius);

@@ -113,6 +113,15 @@ check("markdown becomes elements, not literal characters", () => {
   assert.ok(!html.includes("# Consensus"), "the hash must not survive");
 });
 
+check("a table is wrapped in something that can scroll", () => {
+  // A table's min-content width is the sum of its columns and nothing makes
+  // it smaller, so on a phone an untamed table dragged the article and then
+  // the whole page sideways. The wrapper is what the `.table-scroll` rule in
+  // globals.css hangs off, so losing it is a silent regression.
+  const html = render("| a | b |\n| - | - |\n| 1 | 2 |");
+  assert.match(html, /<div class="table-scroll"><table>/);
+});
+
 check("gfm tables, strikethrough and task lists render", () => {
   const html = render(
     "| a | b |\n| - | - |\n| 1 | 2 |\n\n~~gone~~\n\n- [x] done\n- [ ] not\n",

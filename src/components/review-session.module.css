@@ -2,6 +2,12 @@
   display: grid;
   gap: var(--s4);
 }
+/* Grid and flex items default to min-width:auto, so one wide descendant
+   (a markdown table, a code line, a long token) stretches the track past the
+   viewport instead of being contained by it. */
+.wrap > * {
+  min-width: 0;
+}
 
 /* ── Progress ─────────────────────────────────────────────────────────────── */
 
@@ -37,6 +43,7 @@
 /* ── The card ─────────────────────────────────────────────────────────────── */
 
 .card {
+  min-width: 0;
   padding: var(--s6) var(--s5);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -80,6 +87,7 @@
 }
 
 .answer {
+  min-width: 0;
   margin-top: var(--s5);
   padding-top: var(--s4);
   border-top: 1px solid var(--line);

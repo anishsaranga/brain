@@ -238,12 +238,29 @@ export default function ConceptEditor({
                   style={{ "--i": Math.min(i, 14) } as React.CSSProperties}
                 >
                   <div className={ui.row}>
+                    {/*
+                      Direction is most of what a link means, so the row has
+                      to read as a sentence in the right order: outgoing is
+                      "contrasts with Paxos", incoming is "Quorum prerequisite
+                      of this". Leading with the relation either way produced
+                      "part of Replicated log this".
+                    */}
                     <span className={styles.linkText}>
-                      <span className={styles.rel}>{relLabel(e.type)}</span>
-                      <Link href={`/c/${otherId}`} className={styles.linkTarget}>
-                        {e.from === id ? nameOf(otherId) : nameOf(otherId)}
-                      </Link>
-                      {e.from !== id && <span className={styles.rel}>this</span>}
+                      {e.from === id ? (
+                        <>
+                          <span className={styles.rel}>{relLabel(e.type)}</span>
+                          <Link href={`/c/${otherId}`} className={styles.linkTarget}>
+                            {nameOf(otherId)}
+                          </Link>
+                        </>
+                      ) : (
+                        <>
+                          <Link href={`/c/${otherId}`} className={styles.linkTarget}>
+                            {nameOf(otherId)}
+                          </Link>
+                          <span className={styles.rel}>{relLabel(e.type)} this</span>
+                        </>
+                      )}
                     </span>
                     <button
                       type="button"

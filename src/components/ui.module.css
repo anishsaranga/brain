@@ -29,6 +29,9 @@
   justify-content: space-between;
   gap: var(--s4);
   margin-bottom: var(--s6);
+  /* The aside holds an action (undo a batch). Without wrapping it gets
+     crushed against a long title on a phone. */
+  flex-wrap: wrap;
 }
 
 .pageHeaderMain {
@@ -61,6 +64,7 @@
 
 .section {
   margin-bottom: var(--s6);
+  min-width: 0;
 }
 
 .section:last-child {
@@ -94,6 +98,12 @@
   padding: 0;
   display: grid;
   gap: var(--s2);
+}
+
+/* Same reason as .wrap > *: without this a long unbroken string in a row
+   widens the whole list instead of wrapping inside it. */
+.list > li {
+  min-width: 0;
 }
 
 .row {

@@ -285,5 +285,14 @@ export default function GraphCanvas({
     };
   }, [centerId, nodes, edges, height, router]);
 
-  return <div ref={container} className={`${styles.canvas} fade-in`} style={{ height }} />;
+  // The height goes through a custom property rather than straight into
+  // `height`, because an inline style cannot be overridden by the media
+  // query that shrinks this on a phone.
+  return (
+    <div
+      ref={container}
+      className={`${styles.canvas} fade-in`}
+      style={{ "--canvas-h": `${height}px` } as React.CSSProperties}
+    />
+  );
 }

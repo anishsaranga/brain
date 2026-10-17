@@ -3,6 +3,13 @@
   gap: var(--s5);
 }
 
+/* Grid items are min-width:auto by default, so a wide child (a markdown
+   table, a long unbroken token) stretches the column past the viewport
+   rather than being clipped by it. */
+.wrap > * {
+  min-width: 0;
+}
+
 /* ── Status ───────────────────────────────────────────────────────────────── */
 
 .ok,
