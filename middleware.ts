@@ -43,8 +43,15 @@ export const config = {
   // the health check, Next internals, and files with an extension.
   // The leading "/" with `$` ensures the root itself is gated — a bare
   // `/((?!…).*)` can skip it.
+  // The backslash MUST be escaped. `"\."` in a TypeScript string literal is
+  // just `.`, which turned the final alternative into `.*.` — a lookahead
+  // matching any non-empty path, which excluded the entire site from the
+  // gate. It went unnoticed while `/` was the only page (it is listed
+  // separately, and `.*.` cannot match an empty remainder); the moment the
+  // explorer added routes, /search and /trash answered 200 to anyone.
+  // `scripts/auth-check.mjs` now asserts this pattern's behaviour directly.
   matcher: [
     "/",
-    "/((?!api/auth|api/health|mcp|login|_next/static|_next/image|favicon.ico|.*\.).*)",
+    "/((?!api/auth|api/health|mcp|login|_next/static|_next/image|favicon\\.ico|.*\\.).*)",
   ],
 };

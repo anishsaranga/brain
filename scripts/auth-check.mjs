@@ -462,5 +462,75 @@ await check("isEmailAllowed is what middleware re-checks per request", () => {
   assert.equal(isEmailAllowed(ALLOWED), false, "revocation must take effect immediately");
 });
 
+// ── Which routes the middleware actually gates ───────────────────────────────
+//
+// This section exists because the matcher was broken and nobody noticed.
+// `"\\."` in a TypeScript string literal collapses to `"."`, so the final
+// alternative of the negative lookahead became `.*.` — matching any non-empty
+// path and excluding the whole site from the gate. It was invisible while `/`
+// was the only page, and the moment the explorer landed, /search and /trash
+// served the entire knowledge base to anyone who asked.
+//
+// Next requires config.matcher to be a literal it can read at build time, so
+// it cannot be imported from a shared module. The pattern is read out of the
+// source instead, which is uglier but tests the thing that actually ships.
+
+section("middleware matcher");
+
+const middlewareSource = await import("node:fs").then((fs) =>
+  fs.readFileSync("middleware.ts", "utf8"),
+);
+
+const matcherPatterns = (() => {
+  const block = middlewareSource.match(/matcher:\s*\[([\s\S]*?)\]/);
+  if (!block) throw new Error("could not find config.matcher in middleware.ts");
+  // The literals as the TypeScript compiler would see them: process the
+  // escapes exactly once, the way the language does.
+  return [...block[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => JSON.parse(`"${m[1]}"`));
+})();
+
+const gated = (path) =>
+  matcherPatterns.some((p) => new RegExp(`^${p}$`).test(path));
+
+await check("the matcher gates every page of the explorer", () => {
+  for (const path of [
+    "/",
+    "/search",
+    "/trash",
+    "/c/abc-123",
+    "/topic/Distributed%20systems",
+    "/review",
+    "/anything/we/add/later",
+  ]) {
+    assert.equal(gated(path), true, `${path} MUST be gated`);
+  }
+});
+
+await check("the matcher leaves the four deliberate exemptions alone", () => {
+  // Each of these would break something specific if gated: the MCP endpoint
+  // would get an HTML login redirect, the compose healthcheck has no
+  // session, and the login page and auth callbacks cannot require a login.
+  for (const path of [
+    "/mcp/some-secret",
+    "/api/health",
+    "/api/auth/callback/google",
+    "/api/auth/signin",
+    "/login",
+  ]) {
+    assert.equal(gated(path), false, `${path} must NOT be gated`);
+  }
+});
+
+await check("static assets are exempt but extensionless paths are not", () => {
+  for (const asset of ["/favicon.ico", "/logo.png", "/_next/static/chunk.js"]) {
+    assert.equal(gated(asset), false, `${asset} should be exempt`);
+  }
+  // The bug: a lookahead of `.*.` instead of `.*\.` makes every one of
+  // these exempt too.
+  for (const page of ["/trash", "/search", "/c/x"]) {
+    assert.equal(gated(page), true, `${page} has no extension and must be gated`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
