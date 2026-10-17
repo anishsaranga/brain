@@ -50,13 +50,46 @@ function hash(value: string): number {
   return h >>> 0;
 }
 
-/** A stable colour per topic, so the same cluster is the same colour daily. */
-const TOPIC_HUES = [152, 28, 210, 340, 52, 265, 190, 95, 12, 305];
+/**
+ * A hue per topic, spread evenly around the wheel.
+ *
+ * Assigned by position in the sorted topic list rather than by hashing the
+ * name. Hashing into a fixed palette looks stable but collides constantly at
+ * these numbers: three topics into ten buckets collided on the first real
+ * data, and two unrelated topics drawn in the same colour is worse than any
+ * amount of reshuffling. Sorting keeps it deterministic, so a topic's colour
+ * only moves when the set of topics changes, and the legend names them.
+ *
+ * ACCENT_HUE is skipped because the accent is also the "tracked" ring. A
+ * topic rendered in the same green made tracked and untracked nodes of that
+ * topic impossible to tell apart.
+ */
+const ACCENT_HUE = 152;
+const ACCENT_GUARD = 20;
 
-function topicColor(topic: string | null, dark: boolean): string | null {
-  if (!topic) return null;
-  const hue = TOPIC_HUES[hash(topic) % TOPIC_HUES.length];
-  return dark ? `hsl(${hue} 52% 62%)` : `hsl(${hue} 48% 42%)`;
+function buildTopicHues(topics: string[]): Map<string, number> {
+  const sorted = [...new Set(topics)].sort();
+  const hues = new Map<string, number>();
+  // Walk the wheel from an offset, skipping the band around the accent.
+  const usable = 360 - ACCENT_GUARD * 2;
+  sorted.forEach((topic, i) => {
+    const raw = (i * usable) / Math.max(1, sorted.length);
+    const hue = (raw + ACCENT_HUE + ACCENT_GUARD) % 360;
+    hues.set(topic, Math.round(hue));
+  });
+  return hues;
+}
+
+/**
+ * COMMAS ARE REQUIRED. Cytoscape's colour parser predates the space-separated
+ * `hsl(H S% L%)` syntax and silently falls back to grey on it, with no warning
+ * and no error: every node rendered the same grey while the legend, which is
+ * ordinary CSS and does understand the modern form, showed the right colours.
+ * The legend agreeing with nothing on the canvas is what made it hard to see.
+ */
+function hueToColor(hue: number | undefined, dark: boolean): string | null {
+  if (hue === undefined) return null;
+  return dark ? `hsl(${hue}, 55%, 64%)` : `hsl(${hue}, 50%, 40%)`;
 }
 
 export default function FullGraph() {
@@ -84,6 +117,11 @@ export default function FullGraph() {
     return () => controller.abort();
   }, []);
 
+  const topicHues = useMemo(
+    () => buildTopicHues((data?.nodes ?? []).flatMap((n) => (n.topic ? [n.topic] : []))),
+    [data],
+  );
+
   const legend = useMemo(() => {
     if (!data) return [];
     const counts = new Map<string, number>();
@@ -110,7 +148,7 @@ export default function FullGraph() {
             data: {
               id: n.id,
               label: n.name,
-              color: topicColor(n.topic, dark) ?? colors.muted,
+              color: hueToColor(n.topic ? topicHues.get(n.topic) : undefined, dark) ?? colors.muted,
               size: Math.min(34, 8 + Math.sqrt(n.degree) * 5),
               flagged: n.flagged,
               tracked: n.tracked,
@@ -194,7 +232,18 @@ export default function FullGraph() {
           quality: big ? "default" : "proof",
           nodeRepulsion: 9000,
           idealEdgeLength: 90,
-          nodeSeparation: 90,
+          nodeSeparation: 120,
+          // Two isolated concepts landed 20px apart and their labels merged
+          // into one unreadable word. Turning component packing off did not
+          // help: with no edges there is nothing pulling them apart, so they
+          // just stayed where they were seeded. These three options fix it
+          // properly. The first makes the layout reserve space for the label
+          // rather than the dot, which is what actually collides; the others
+          // tile disconnected nodes on a padded grid instead of heaping them.
+          nodeDimensionsIncludeLabels: true,
+          tile: true,
+          tilingPaddingVertical: 30,
+          tilingPaddingHorizontal: 30,
           padding: 40,
         } as cytoscape.LayoutOptions,
         minZoom: 0.05,
@@ -265,7 +314,7 @@ export default function FullGraph() {
       cy.destroy();
       cyRef.current = null;
     };
-  }, [data, router]);
+  }, [data, router, topicHues]);
 
   if (error) {
     return <div className={styles.state}>{error}</div>;
@@ -326,7 +375,7 @@ export default function FullGraph() {
             <li key={topic} className={styles.legendItem}>
               <span
                 className={styles.swatch}
-                style={{ background: topicColor(topic, false) ?? undefined }}
+                style={{ background: hueToColor(topicHues.get(topic), false) ?? undefined }}
                 aria-hidden="true"
               />
               {topic}
