@@ -28,16 +28,16 @@
 
 .EXAMPLE
   # Rotate both, then recreate the container:
-  powershell -File scripts/rotate-mcp-secrets.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1
   docker compose up -d --build brain-web
 
 .EXAMPLE
   # When you are ready to paste into the connector dialog:
-  powershell -File scripts/rotate-mcp-secrets.ps1 -Show
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1 -Show
 
 .EXAMPLE
   # Rotate only the token, leaving the URL (and the connector) alone:
-  powershell -File scripts/rotate-mcp-secrets.ps1 -TokenOnly
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1 -TokenOnly
 #>
 [CmdletBinding()]
 param(
@@ -162,5 +162,5 @@ Write-Host "    docker compose up -d --build brain-web"
 if (-not $TokenOnly) {
   Write-Host "    ...then update the connector URL in claude.ai - it is broken until you do."
 }
-Write-Host "    powershell -File scripts/rotate-mcp-secrets.ps1 -Show   # when pasting"
+Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1 -Show   # when pasting"
 Write-Host ""

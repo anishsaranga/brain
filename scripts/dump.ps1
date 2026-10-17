@@ -19,7 +19,7 @@
   a confusing failure rather than a useful recovery.
 
 .EXAMPLE
-  powershell -File scripts/dump.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dump.ps1
 #>
 [CmdletBinding()]
 param(

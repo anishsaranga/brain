@@ -16,8 +16,8 @@
   staleness if a run of them is missed.
 
 .EXAMPLE
-  powershell -File scripts/register-backup-tasks.ps1
-  powershell -File scripts/register-backup-tasks.ps1 -NightlyAt 03:30 -Unregister
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/register-backup-tasks.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/register-backup-tasks.ps1 -NightlyAt 03:30 -Unregister
 #>
 [CmdletBinding()]
 param(

@@ -51,8 +51,18 @@ writes them straight into `.env`, and never prints them — a secret you have
 pasted through a terminal is one you can no longer account for:
 
 ```powershell
-powershell -File scripts/rotate-mcp-secrets.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1
 ```
+
+`-ExecutionPolicy Bypass` is not window dressing: a default Windows box
+refuses to run an unsigned local `.ps1` at all, with a SecurityError that
+reads like a permissions problem. It applies to that one process only, so
+prefer it over `Set-ExecutionPolicy`, which is a persistent machine-wide
+change made in order to run a script you wrote yourself. `-NoProfile` stops
+your shell profile from altering what the script sees. **Every script in
+`scripts/` needs both flags when run by hand.** The scheduled tasks already
+pass them, which is why the nightly export has always worked while the
+hand-typed commands in this file did not.
 
 **`NEO4J_AUTH` only applies on the first boot of an empty data volume.** Editing
 `NEO4J_PASSWORD` in `.env` later changes nothing — the password is already baked
@@ -228,7 +238,7 @@ redeploy.
 **Roll it out in two steps, because getting this wrong produces a 404 that is
 indistinguishable from a broken tunnel:**
 
-1. **Permissive.** `powershell -File scripts/rotate-mcp-secrets.ps1`, then
+1. **Permissive.** `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rotate-mcp-secrets.ps1`, then
    recreate `brain-web`. It leaves `MCP_REQUIRE_TOKEN` unset, so the token
    is compared and reported but not required, and nothing you mistype in
    the dialog can break anything. **Rotating the path secret changes the
@@ -385,7 +395,7 @@ act on, not a reason for Docker to start restarting a working service.
 ### Scheduling
 
 ```powershell
-powershell -File scripts/register-backup-tasks.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/register-backup-tasks.ps1
 ```
 
 Registers `\brain\brain-export-json` (nightly 04:00) and `\brain\brain-dump`
