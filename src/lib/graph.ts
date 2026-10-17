@@ -7,35 +7,12 @@ import { embed, embeddingHash, embeddingText, EMBEDDING_MODEL, EMBEDDING_VERSION
  * explorer, the review session — is a thin wrapper over what is here.
  */
 
-/**
- * The closed relationship vocabulary, and the single source of truth for it.
- *
- * The MCP tool schema derives its enum from this export rather than
- * redeclaring the list, because the cheapest possible hygiene mechanism for a
- * graph fed by a language model across hundreds of independent conversations
- * is to make the invalid value unrepresentable. Without it you get
- * RELATES_TO / RELATED_TO / IS_RELATED_TO and a graph nothing can query.
- */
-export const REL_TYPES = [
-  "PREREQUISITE_OF",
-  "RELATED_TO",
-  "EXAMPLE_OF",
-  "CONTRASTS_WITH",
-  "PART_OF",
-  "CITES",
-] as const;
-
-export type RelType = (typeof REL_TYPES)[number];
-
-/** Types that read the same in both directions; the UI draws them unarrowed. */
-export const UNDIRECTED: ReadonlySet<RelType> = new Set<RelType>([
-  "RELATED_TO",
-  "CONTRASTS_WITH",
-]);
-
-export function isRelType(value: string): value is RelType {
-  return (REL_TYPES as readonly string[]).includes(value);
-}
+// The relationship vocabulary lives in its own module so the explorer's
+// client components can import it without pulling neo4j-driver into the
+// browser bundle. Re-exported here because this is where callers expect it,
+// and it remains the single source of truth the MCP tool enum derives from.
+export { REL_TYPES, UNDIRECTED, isRelType, relLabel, type RelType } from "@/lib/rel-types";
+import { REL_TYPES, isRelType, type RelType } from "@/lib/rel-types";
 
 export interface Concept {
   id: string;
@@ -707,4 +684,239 @@ export async function getRevisions(
       return [];
     }
   });
+}
+
+// ── The explorer ─────────────────────────────────────────────────────────────
+
+export interface TopicSummary {
+  name: string;
+  concepts: number;
+  tracked: number;
+}
+
+/**
+ * Topics with their sizes, plus the concepts that belong to none.
+ *
+ * This is the explorer's way in. A search box is useless when you do not yet
+ * know what you are looking for, which is most of the time with a knowledge
+ * base you have been feeding for months.
+ */
+export async function topicOverview(): Promise<{
+  topics: TopicSummary[];
+  untopiced: number;
+}> {
+  const result = await read(`
+    MATCH (t:Topic)<-[:PART_OF]-(c:Concept)
+    WHERE ${ALIVE}
+    RETURN t.name AS name,
+           count(c) AS concepts,
+           count(CASE WHEN c.tracked = true THEN 1 END) AS tracked
+    ORDER BY concepts DESC, name ASC
+  `);
+
+  const loose = await read(`
+    MATCH (c:Concept)
+    WHERE ${ALIVE} AND NOT (c)-[:PART_OF]->(:Topic)
+    RETURN count(c) AS n
+  `);
+
+  return {
+    topics: result.records.map((r) => ({
+      name: String(r.get("name")),
+      concepts: num(r.get("concepts")),
+      tracked: num(r.get("tracked")),
+    })),
+    untopiced: num(loose.records[0]?.get("n")),
+  };
+}
+
+/** Live concepts in a topic, most recently updated first. */
+export async function conceptsInTopic(topic: string, limit = 100): Promise<Concept[]> {
+  const result = await read(
+    `
+    MATCH (c:Concept)-[:PART_OF]->(t:Topic {name: $topic})
+    WHERE ${ALIVE}
+    OPTIONAL MATCH (c)-[:PART_OF]->(all:Topic)
+    RETURN c AS concept, collect(DISTINCT all.name) AS topics
+    ORDER BY c.updatedAt DESC
+    LIMIT $limit
+    `,
+    { topic, limit: int(Math.max(1, Math.min(500, limit))) },
+  );
+  return result.records.map((r) =>
+    toConcept((r.get("concept") as { properties: Record<string, unknown> }).properties,
+      r.get("topics") as string[]),
+  );
+}
+
+/** Most recently updated live concepts, for the overview. */
+export async function recentConcepts(limit = 12): Promise<Concept[]> {
+  const result = await read(
+    `
+    MATCH (c:Concept)
+    WHERE ${ALIVE}
+    OPTIONAL MATCH (c)-[:PART_OF]->(t:Topic)
+    RETURN c AS concept, collect(DISTINCT t.name) AS topics
+    ORDER BY c.updatedAt DESC
+    LIMIT $limit
+    `,
+    { limit: int(Math.max(1, Math.min(100, limit))) },
+  );
+  return result.records.map((r) =>
+    toConcept((r.get("concept") as { properties: Record<string, unknown> }).properties,
+      r.get("topics") as string[]),
+  );
+}
+
+export interface DeletedConcept {
+  id: string;
+  name: string;
+  deletedAt: string;
+  edges: number;
+}
+
+/** Tombstoned concepts. The one view that deliberately looks past `ALIVE`. */
+export async function listDeleted(limit = 100): Promise<DeletedConcept[]> {
+  const result = await read(
+    `
+    MATCH (c:Concept)
+    WHERE c.deletedAt IS NOT NULL
+    RETURN c.id AS id, c.name AS name, toString(c.deletedAt) AS deletedAt,
+           count{ (c)-[]-(:Concept) } AS edges
+    ORDER BY c.deletedAt DESC
+    LIMIT $limit
+    `,
+    { limit: int(Math.max(1, Math.min(500, limit))) },
+  );
+  return result.records.map((r) => ({
+    id: String(r.get("id")),
+    name: String(r.get("name")),
+    deletedAt: String(r.get("deletedAt")),
+    edges: num(r.get("edges")),
+  }));
+}
+
+export interface DeletionImpact {
+  id: string;
+  name: string;
+  /** Live concepts that lose a link if this is destroyed. */
+  severs: Array<{ id: string; name: string; type: RelType }>;
+}
+
+/**
+ * What a hard delete would break.
+ *
+ * Shown before the fact, because the edges are the part people forget: the
+ * note is one paragraph they could rewrite, while the connections to it are
+ * the thinking they cannot.
+ */
+export async function deletionImpact(id: string): Promise<DeletionImpact | null> {
+  const result = await read(
+    `
+    MATCH (c:Concept {id: $id})
+    OPTIONAL MATCH (c)-[r]-(other:Concept)
+    WHERE other.deletedAt IS NULL
+    RETURN c.name AS name,
+           collect(DISTINCT {id: other.id, name: other.name, type: type(r)}) AS severs
+    `,
+    { id },
+  );
+  const rec = result.records[0];
+  if (!rec) return null;
+
+  const severs = (rec.get("severs") as Array<{ id: string; name: string; type: string }>)
+    .filter((s) => s && s.id)
+    .map((s) => ({ id: s.id, name: s.name, type: s.type as RelType }));
+
+  return { id, name: String(rec.get("name")), severs };
+}
+
+/**
+ * Destroy a concept and its edges. The only irreversible operation in the
+ * system, and the only one not reachable over MCP.
+ *
+ * Two guards, both enforced here rather than in the UI, because a guard that
+ * lives only in a form is a guard that a stray fetch does not have to pass:
+ *
+ *  - the concept must already be tombstoned, so destroying something is
+ *    always two deliberate steps taken at two different moments;
+ *  - `confirmName` must match the stored name exactly, so the caller has to
+ *    have read what they are about to destroy.
+ */
+export async function hardDeleteConcept(
+  id: string,
+  confirmName: string,
+): Promise<{ deleted: boolean; reason?: string; name?: string }> {
+  const existing = await read(
+    "MATCH (c:Concept {id: $id}) RETURN c.name AS name, c.deletedAt IS NOT NULL AS tombstoned",
+    { id },
+  );
+  const rec = existing.records[0];
+  if (!rec) return { deleted: false, reason: "No concept with that id." };
+
+  const name = String(rec.get("name"));
+  if (!rec.get("tombstoned")) {
+    return {
+      deleted: false,
+      reason: "Delete it first. Permanent removal only applies to something already in the trash.",
+    };
+  }
+  if (confirmName.trim() !== name) {
+    return { deleted: false, reason: "The typed name does not match." };
+  }
+
+  await write("MATCH (c:Concept {id: $id}) DETACH DELETE c", { id });
+  return { deleted: true, name };
+}
+
+/**
+ * Remove one relationship. UI-only, like hard delete.
+ *
+ * Edges carry reinforcement counts that accumulate as you walk the graph, so
+ * removing one does lose something — but a wrong link is worse than no link,
+ * and the alternative is a graph you stop trusting.
+ */
+export async function unlinkConcepts(
+  fromId: string,
+  toId: string,
+  type: RelType,
+): Promise<{ removed: boolean }> {
+  if (!isRelType(type)) {
+    throw new Error(`Unknown relationship type "${type}".`);
+  }
+  const result = await write(
+    `
+    MATCH (a:Concept {id: $fromId})-[r:${type}]-(b:Concept {id: $toId})
+    DELETE r
+    RETURN count(r) AS n
+    `,
+    { fromId, toId },
+  );
+  return { removed: num(result.records[0]?.get("n")) > 0 };
+}
+
+/**
+ * Concepts semantically near this one that it is NOT already linked to.
+ *
+ * Shared by the `suggest_links` tool and the explorer, so both answer the
+ * question the same way. Each conversation is blind to the others, so without
+ * deliberate stitching the graph becomes a pile of per-conversation islands —
+ * folders with extra steps.
+ */
+export async function unlinkedNeighbours(
+  conceptId: string,
+  limit = 8,
+): Promise<ScoredConcept[]> {
+  const row = await read("MATCH (c:Concept {id: $id}) RETURN c.embedding AS vec", {
+    id: conceptId,
+  });
+  const vec = row.records[0]?.get("vec") as number[] | null;
+  if (!vec) return [];
+
+  const linked = await read(
+    "MATCH (c:Concept {id: $id})-[]-(o:Concept) RETURN collect(DISTINCT o.id) AS ids",
+    { id: conceptId },
+  );
+  const exclude = [conceptId, ...((linked.records[0]?.get("ids") as string[]) ?? [])];
+  return findSimilar(vec, { excludeIds: exclude, limit, minScore: 0.5 });
 }

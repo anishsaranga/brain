@@ -2,7 +2,7 @@ import {
   getConcept,
   getNeighbourhood,
   hybridSearch,
-  findSimilar,
+  unlinkedNeighbours,
   graphStats,
   softDeleteConcept,
   restoreConcept,
@@ -158,20 +158,9 @@ export async function suggestLinks(conceptId: string): Promise<ToolOutput> {
   const concept = await getConcept(conceptId);
   if (!concept) return { summary: `No concept matching "${conceptId}".`, data: null };
 
-  const row = await read("MATCH (c:Concept {id: $id}) RETURN c.embedding AS vec", {
-    id: concept.id,
-  });
-  const vec = row.records[0]?.get("vec") as number[] | null;
-  if (!vec) {
-    return { summary: `"${concept.name}" has no embedding yet.`, data: [] };
-  }
-
-  const linked = await read(
-    "MATCH (c:Concept {id: $id})-[]-(o:Concept) RETURN collect(DISTINCT o.id) AS ids",
-    { id: concept.id },
-  );
-  const exclude = [concept.id, ...((linked.records[0]?.get("ids") as string[]) ?? [])];
-  const candidates = await findSimilar(vec, { excludeIds: exclude, limit: 8, minScore: 0.5 });
+  // Shared with the explorer, so the tool and the UI agree on what counts
+  // as a suggestion.
+  const candidates = await unlinkedNeighbours(concept.id, 8);
 
   return {
     summary:

@@ -82,6 +82,7 @@ docker compose -f docker-compose.test.yml up -d
 npm run graph:check      # graph core: upsert, links, neighbourhoods, search
 npm run backup:check     # export → wipe → import → assert identical
 npm run tools:check      # tool behaviour, caps, and the security refusals
+npm run explorer:check   # soft delete across the UI, and hard delete's guards
 docker compose -f docker-compose.test.yml down
 ```
 
@@ -133,6 +134,12 @@ so the defences are structural rather than instructional:
   so the guard is.
 - **Stored content is returned inside an untrusted-data envelope**, and errors
   are sanitised so neither endpoint credential can leak through one.
+- **Hard delete is the one irreversible operation, and it is UI-only.** It
+  is unreachable over MCP, requires the concept to be tombstoned first, and
+  requires its name typed exactly — both guards enforced in the data layer,
+  not the form, since a guard that lives in a React component is one a stray
+  request never has to pass. The page shows which links it would sever
+  before offering the control.
 - **The web UI has no password.** Google sign-in, with an allowlist that is
   the real boundary — the provider proves identity, never authorisation. It
   fails closed when unset, checks `email_verified` rather than trusting it,

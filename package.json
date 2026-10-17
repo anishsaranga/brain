@@ -14,11 +14,13 @@
     "export:md": "node --env-file-if-exists=.env --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/alias-hook.mjs scripts/export-markdown.mjs",
     "import:json": "node --env-file-if-exists=.env --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/alias-hook.mjs scripts/import-json.mjs",
     "tools:check": "docker compose -f docker-compose.test.yml run --rm brain-tools-check",
-    "auth:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/alias-hook.mjs scripts/auth-check.mjs"
+    "auth:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/alias-hook.mjs scripts/auth-check.mjs",
+    "explorer:check": "docker compose -f docker-compose.test.yml run --rm brain-explorer-check"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/server": "^2.3.1",
+    "cytoscape": "^3.33.1",
     "mcp-handler": "^2.3.0",
     "neo4j-driver": "^6.2.0",
     "next": "16.4.2",
@@ -29,6 +31,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/cytoscape": "^3.21.9",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

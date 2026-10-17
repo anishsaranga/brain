@@ -600,6 +600,7 @@ docker compose -f docker-compose.test.yml up -d
 npm run graph:check      # 29 — graph core
 npm run backup:check     # 25 — export/restore round trip
 npm run tools:check      # 59 — tool behaviour and the security refusals
+npm run explorer:check   # 17 — soft delete across the UI's read paths, hard delete
 docker compose -f docker-compose.test.yml down
 ```
 
