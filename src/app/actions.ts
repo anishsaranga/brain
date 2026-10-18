@@ -11,6 +11,7 @@ import {
   restoreConcept,
   hardDeleteConcept,
   setConceptFlags,
+  setTracked,
   isRelType,
   type RelType,
 } from "@/lib/graph";
@@ -211,6 +212,44 @@ export async function flagCard(id: string, note?: string): Promise<ActionResult>
   revalidatePath("/hygiene");
   revalidatePath(`/c/${id}`);
   return { ok: true, message: "Flagged for a fix. It stays in the queue." };
+}
+
+/**
+ * Put a note into spaced repetition, or take it out.
+ *
+ * Storage and rehearsal are separate opt-ins here, so this is the deliberate
+ * promotion the README describes — and it has to be one click, because the
+ * moment you know you want a note back is while you are reading it, not
+ * after you have found the checkbox at the bottom of an edit form.
+ *
+ * A prompt may ride along. Blank means "leave whatever is there", because the
+ * control sends the field on every save and an empty box must not wipe a
+ * prompt someone wrote earlier; only an explicit `null` clears one.
+ */
+export async function trackConcept(
+  id: string,
+  tracked: boolean,
+  prompt?: string | null,
+): Promise<ActionResult> {
+  await requireUser();
+
+  const trimmed = typeof prompt === "string" ? prompt.trim() : prompt;
+  const result = await setTracked(id, tracked, {
+    prompt: trimmed === "" ? undefined : trimmed,
+  });
+  if (!result) return fail("No concept with that id, or it is in the trash.");
+
+  revalidatePath(`/c/${id}`);
+  revalidatePath("/review");
+  // The nav's due badge counts tracked concepts, and it is on every page.
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    message: result.tracked
+      ? "In review. It will come up in a session."
+      : "Out of review. The note itself is untouched.",
+  };
 }
 
 /** Clear a flag once the note has been corrected. */

@@ -166,26 +166,6 @@
   font-size: var(--step-0);
 }
 
-.check {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.55rem;
-  font-size: var(--step-0);
-  cursor: pointer;
-}
-
-.check input {
-  margin-top: 0.3em;
-  accent-color: var(--accent);
-}
-
-.checkHint {
-  display: block;
-  font-size: 0.78rem;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
 .actions {
   display: flex;
   align-items: center;

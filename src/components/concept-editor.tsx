@@ -28,7 +28,6 @@ export default function ConceptEditor({
   prompt,
   aliases,
   topics,
-  tracked,
   neighbours,
   edges,
   suggestions,
@@ -39,7 +38,6 @@ export default function ConceptEditor({
   prompt: string | null;
   aliases: string[];
   topics: string[];
-  tracked: boolean;
   neighbours: Neighbour[];
   edges: Array<{ from: string; to: string; type: string }>;
   suggestions: Array<{ id: string; name: string; score: number }>;
@@ -50,14 +48,24 @@ export default function ConceptEditor({
   const [editing, setEditing] = useState(false);
   const [preview, setPreview] = useState(false);
 
-  const [draft, setDraft] = useState({
+  /**
+   * The note as the server last sent it.
+   *
+   * Opening the editor re-seeds from this rather than keeping whatever was
+   * typed last time, because the page can have changed underneath: the review
+   * prompt is also writable from the track control in the header, and
+   * `update_concept` can rewrite a note over MCP between visits. A draft held
+   * from an earlier render would quietly put the old values back on Save.
+   */
+  const fresh = () => ({
     name,
     body,
     prompt: prompt ?? "",
     aliases: aliases.join(", "),
     topics: topics.join(", "),
-    tracked,
   });
+
+  const [draft, setDraft] = useState(fresh);
 
   const run = (fn: () => Promise<ActionResult>) =>
     start(async () => {
@@ -108,7 +116,10 @@ export default function ConceptEditor({
             <button
               type="button"
               onClick={() => {
-                setEditing((v) => !v);
+                setEditing((v) => {
+                  if (!v) setDraft(fresh());
+                  return !v;
+                });
                 setPreview(false);
               }}
               className={styles.quiet}
@@ -174,20 +185,6 @@ export default function ConceptEditor({
               </Field>
             </div>
 
-            <label className={styles.check}>
-              <input
-                type="checkbox"
-                checked={draft.tracked}
-                onChange={(e) => setDraft({ ...draft, tracked: e.target.checked })}
-              />
-              <span>
-                In spaced repetition
-                <span className={styles.checkHint}>
-                  Most notes are reference material you want to find, not memorise.
-                </span>
-              </span>
-            </label>
-
             <div className={styles.actions}>
               <button
                 type="button"
@@ -201,7 +198,6 @@ export default function ConceptEditor({
                       prompt: draft.prompt.trim() === "" ? null : draft.prompt,
                       aliases: splitList(draft.aliases),
                       topics: splitList(draft.topics),
-                      tracked: draft.tracked,
                     });
                     if (r.ok) setEditing(false);
                     return r;

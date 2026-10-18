@@ -11,6 +11,7 @@ import {
 import GraphCanvas from "@/components/graph-canvas";
 import ConceptEditor from "@/components/concept-editor";
 import Markdown from "@/components/markdown";
+import TrackToggle from "@/components/track-toggle";
 import { Page, Section, Tag, Note } from "@/components/ui";
 import styles from "./concept.module.css";
 
@@ -87,7 +88,12 @@ export default async function ConceptPage({
               {t}
             </Link>
           ))}
-          {concept.tracked && <Tag tone="accent">in review</Tag>}
+          <TrackToggle
+            id={concept.id}
+            tracked={concept.tracked}
+            prompt={concept.prompt}
+            size="small"
+          />
           {concept.flagged && <Tag tone="danger">flagged</Tag>}
           {concept.aliases.length > 0 && (
             <span className={styles.aliases}>also {concept.aliases.join(", ")}</span>
@@ -107,7 +113,6 @@ export default async function ConceptPage({
             prompt={concept.prompt}
             aliases={concept.aliases}
             topics={concept.topics}
-            tracked={concept.tracked}
             neighbours={(hood?.nodes ?? []).map((n) => ({ id: n.id, name: n.name }))}
             edges={edges}
             suggestions={unlinked.map((s) => ({ id: s.id, name: s.name, score: s.score }))}

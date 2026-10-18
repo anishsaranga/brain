@@ -120,6 +120,26 @@
   background: var(--bg-raised);
 }
 
+/*
+ * Title on the left, the track control on the right, baseline aligned so the
+ * control sits with the title rather than floating above it. It wraps under
+ * on a narrow screen instead of squeezing a long concept name.
+ */
+.noteHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--s2);
+}
+
+.noteHead > :first-child {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
 .centreTitle {
   font-size: var(--step-2);
   letter-spacing: -0.02em;

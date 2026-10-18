@@ -5,6 +5,7 @@ import { neighbourhoodNotes, READING_CAP, type ReadingItem } from "@/lib/graph";
 import { UNDIRECTED, relLabel } from "@/lib/rel-types";
 import { plainText } from "@/lib/markdown";
 import Markdown from "@/components/markdown";
+import TrackToggle from "@/components/track-toggle";
 import { Page, Note, Empty } from "@/components/ui";
 import styles from "./read.module.css";
 
@@ -97,7 +98,10 @@ export default async function ReadPage({
       <div className={styles.columns}>
         <div className={styles.main}>
           <article className={styles.centre} id={`n-${center.id}`}>
-            <h2 className={styles.centreTitle}>{center.name}</h2>
+            <div className={styles.noteHead}>
+              <h2 className={styles.centreTitle}>{center.name}</h2>
+              <TrackToggle id={center.id} tracked={center.tracked} prompt={center.prompt} />
+            </div>
             <Topics topics={center.topics} />
             <div className={styles.body}>
               <Markdown>{center.body}</Markdown>
@@ -125,9 +129,17 @@ export default async function ReadPage({
                   .filter((i) => i.hop === hop)
                   .map((item) => (
                     <article key={item.concept.id} className={styles.note} id={`n-${item.concept.id}`}>
-                      <h3 className={styles.noteTitle}>
-                        <Link href={`/c/${item.concept.id}`}>{item.concept.name}</Link>
-                      </h3>
+                      <div className={styles.noteHead}>
+                        <h3 className={styles.noteTitle}>
+                          <Link href={`/c/${item.concept.id}`}>{item.concept.name}</Link>
+                        </h3>
+                        <TrackToggle
+                          id={item.concept.id}
+                          tracked={item.concept.tracked}
+                          prompt={item.concept.prompt}
+                          size="small"
+                        />
+                      </div>
                       <Relation item={item} />
                       <Topics topics={item.concept.topics} />
                       <div className={styles.body}>

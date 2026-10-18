@@ -1,0 +1,207 @@
+/*
+ * Grid rather than inline, because the optional prompt field drops out of
+ * this element and must not drag the button around when it opens. Both roots
+ * cap at the space they are given: this sits inside flex rows (a note header,
+ * the concept page's tag line) where a wide child would otherwise overflow.
+ */
+.root,
+.smallRoot {
+  display: grid;
+  gap: var(--s2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.smallRoot {
+  justify-items: start;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+/*
+ * Two states, one shape, so the control does not jump when it flips.
+ *
+ * Off is a quiet outline — the same weight as every other secondary control
+ * in the app, because most notes are reference material and the page should
+ * not be nagging you to memorise forty of them. On is filled, because it is
+ * reporting a fact about the note rather than offering an action, and it
+ * needs to be legible at a glance when you are scrolling past thirty of them.
+ */
+.off,
+.on {
+  flex: none;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-family: var(--sans);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+
+.off {
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--muted);
+}
+
+.off:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  background: var(--accent-wash);
+}
+
+.on {
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.on:hover:not(:disabled) {
+  /* Hovering the filled state means "take it out", so it retreats to the
+     outline it would become rather than brightening as if to confirm. */
+  background: var(--accent-wash);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+
+.off:disabled,
+.on:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.editPrompt {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.editPrompt:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.editPrompt:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* ── The optional prompt ──────────────────────────────────────────────────── */
+
+.ask {
+  display: grid;
+  gap: 0.3rem;
+  min-width: min(22rem, 100%);
+  max-width: min(34rem, 100%);
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  animation: fade var(--fast) var(--ease);
+}
+
+.askLabel {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.askRow {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.askInput {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--step--1);
+}
+
+.askInput::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.askSave {
+  flex: none;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--step--1);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--fast) var(--ease);
+}
+
+.askSave:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.askSave:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.askSkip {
+  flex: none;
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-size: var(--step--1);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease);
+}
+
+.askSkip:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.askSkip:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.askHint {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask {
+    animation: none;
+  }
+}
