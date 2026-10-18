@@ -514,7 +514,7 @@ await check("it returns live concepts with their degree", async () => {
   const raft = graph.nodes.find((n) => n.id === ids.raft);
   assert.equal(raft.degree, 3, "Raft is joined to the other three");
   assert.equal(raft.tracked, true);
-  assert.equal(raft.topic, "Distributed systems");
+  assert.deepEqual(raft.topics, ["Distributed systems"]);
 
   assert.equal(graph.edges.length, 3);
 });
@@ -545,6 +545,151 @@ await check("an empty graph is empty rather than an error", async () => {
   await reset();
   const graph = await G.fullGraph();
   assert.deepEqual(graph, { nodes: [], edges: [], truncated: false, total: 0 });
+});
+
+await check("every topic comes back, not just the alphabetically first", async () => {
+  await reset();
+  await G.upsertConcept({
+    name: "Sharding",
+    body: "Partitioning.",
+    topics: ["system-design", "databases", "interview"],
+  });
+  const graph = await G.fullGraph();
+  assert.deepEqual(graph.nodes[0].topics, ["databases", "interview", "system-design"]);
+});
+
+// ── Walking the neighbourhood as something to read ───────────────────────────
+
+section("neighbourhoodNotes");
+
+await check("one hop out comes back with the bodies", async () => {
+  const ids = await fixture();
+  const walk = await G.neighbourhoodNotes(ids.raft, 1);
+
+  assert.equal(walk.center.id, ids.raft);
+  assert.equal(walk.items.length, 3);
+  assert.equal(walk.truncated, false);
+  assert.ok(walk.items.every((i) => i.hop === 1));
+  const paxos = walk.items.find((i) => i.concept.id === ids.paxos);
+  assert.equal(paxos.concept.body, "Earlier consensus protocol.");
+});
+
+await check("a second hop is reached and numbered", async () => {
+  const ids = await fixture();
+  const walk = await G.neighbourhoodNotes(ids.quorum, 2);
+
+  const hops = new Map(walk.items.map((i) => [i.concept.id, i.hop]));
+  assert.equal(hops.get(ids.raft), 1, "Raft is one link from Quorum");
+  assert.equal(hops.get(ids.paxos), 2, "Paxos is two");
+  assert.equal(hops.get(ids.stale), 2);
+  assert.equal(hops.size, 3);
+});
+
+await check("the centre is never in its own walk", async () => {
+  const ids = await fixture();
+  const walk = await G.neighbourhoodNotes(ids.raft, 3);
+  assert.ok(!walk.items.some((i) => i.concept.id === ids.raft));
+});
+
+await check("each note says what it hangs off, and which way", async () => {
+  const ids = await fixture();
+  const walk = await G.neighbourhoodNotes(ids.raft, 1);
+
+  // Quorum is a PREREQUISITE_OF Raft, so from Quorum's side the relation
+  // points away from it: "this note, prerequisite of, Raft".
+  const quorum = walk.items.find((i) => i.concept.id === ids.quorum);
+  assert.equal(quorum.via.id, ids.raft);
+  assert.equal(quorum.via.name, "Raft");
+  assert.equal(quorum.via.type, "PREREQUISITE_OF");
+  assert.equal(quorum.via.incoming, false, "the arrow leaves Quorum");
+});
+
+await check("direction is read from the relationship, not assumed", async () => {
+  await reset();
+  const cause = await G.upsertConcept({ name: "Cause", body: "First." });
+  const effect = await G.upsertConcept({ name: "Effect", body: "Second." });
+  await G.linkConcepts(cause.id, effect.id, "PREREQUISITE_OF");
+
+  // `incoming` is relative to the NOTE BEING READ, not to the note you
+  // started from. Walking out from Effect, the note you are reading is
+  // Cause, and the arrow leaves Cause: "this note, prerequisite of, Effect".
+  const fromEffect = await G.neighbourhoodNotes(effect.id, 1);
+  assert.equal(fromEffect.items[0].concept.id, cause.id);
+  assert.equal(fromEffect.items[0].via.incoming, false, "the arrow leaves Cause");
+
+  // The other way round, the note being read is Effect and the arrow points
+  // at it: "Cause, prerequisite of, this note".
+  const fromCause = await G.neighbourhoodNotes(cause.id, 1);
+  assert.equal(fromCause.items[0].concept.id, effect.id);
+  assert.equal(fromCause.items[0].via.incoming, true, "the arrow points at Effect");
+});
+
+await check("a tombstone is not in the walk, and is not walked through", async () => {
+  const ids = await fixture();
+  await G.softDeleteConcept(ids.raft);
+
+  const walk = await G.neighbourhoodNotes(ids.quorum, 3);
+  assert.equal(walk.items.length, 0, "Raft was the only way out of Quorum");
+});
+
+await check("the cap stops the walk and says so", async () => {
+  const ids = await fixture();
+  const walk = await G.neighbourhoodNotes(ids.raft, 1, 2);
+  assert.equal(walk.items.length, 2);
+  assert.equal(walk.truncated, true);
+});
+
+await check("a concept with no links is an empty walk, not an error", async () => {
+  await reset();
+  const lonely = await G.upsertConcept({ name: "Lonely", body: "Nothing links here." });
+  const walk = await G.neighbourhoodNotes(lonely.id, 3);
+  assert.deepEqual(walk.items, []);
+  assert.equal(walk.truncated, false);
+});
+
+await check("an unknown id is null rather than a crash", async () => {
+  await reset();
+  assert.equal(await G.neighbourhoodNotes("no-such-id", 1), null);
+});
+
+// ── The topic leak ───────────────────────────────────────────────────────────
+//
+// PART_OF is both a concept-to-concept relation and the concept-to-topic
+// edge, so a variable-length match that does not constrain what it passes
+// through walks Concept -> Topic -> Concept and calls everything sharing a
+// tag a 2-hop neighbour. On the real graph that was 135 neighbours where
+// there are 102, with the cap then dropping real links to make room.
+
+section("sharing a topic is not a link");
+
+await check("two concepts with the same topic and no link are not neighbours", async () => {
+  await reset();
+  const a = await G.upsertConcept({ name: "Alpha", body: "One.", topics: ["shared"] });
+  const b = await G.upsertConcept({ name: "Beta", body: "Two.", topics: ["shared"] });
+
+  const walk = await G.neighbourhoodNotes(a.id, 3);
+  assert.deepEqual(walk.items, [], "reached Beta through the Topic node");
+
+  const hood = await G.getNeighbourhood(a.id, 3);
+  assert.deepEqual(
+    hood.nodes.map((n) => n.id),
+    [],
+    "getNeighbourhood walked through the Topic node",
+  );
+  assert.ok(b.id, "fixture sanity");
+});
+
+await check("a concept-to-concept PART_OF still counts as a link", async () => {
+  await reset();
+  const part = await G.upsertConcept({ name: "Wheel", body: "Round." });
+  const whole = await G.upsertConcept({ name: "Car", body: "Drives." });
+  await G.linkConcepts(part.id, whole.id, "PART_OF");
+
+  const walk = await G.neighbourhoodNotes(part.id, 1);
+  assert.deepEqual(walk.items.map((i) => i.concept.id), [whole.id]);
+
+  const hood = await G.getNeighbourhood(part.id, 1);
+  assert.deepEqual(hood.nodes.map((n) => n.id), [whole.id]);
 });
 
 // ── Teardown ─────────────────────────────────────────────────────────────────

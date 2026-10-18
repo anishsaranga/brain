@@ -376,11 +376,21 @@ export async function getNeighbourhood(
   const d = Math.max(1, Math.min(3, Math.trunc(depth) || 1));
   const cap = Math.max(1, Math.min(500, Math.trunc(limit) || 100));
 
+  // Every node ON the path has to be a live Concept, not just the far end.
+  //
+  // PART_OF is overloaded: it is both a concept-to-concept relation in
+  // REL_TYPES and the concept-to-topic edge. Without this predicate a depth-2
+  // path can go Concept -> Topic -> Concept, so every concept sharing a topic
+  // looks like a 2-hop neighbour. On the busiest concept here that was 135
+  // "neighbours" where there are 102, and since the node set is capped at
+  // 100 the extras were pushing out real links. Filtering on the
+  // relationship type would be the wrong fix: concept-to-concept PART_OF is
+  // legitimate and has to keep working.
   const nodeResult = await read(
     `
-    MATCH (c:Concept {id: $id})
-    MATCH (c)-[*1..${d}]-(m:Concept)
-    WHERE m.id <> $id AND m.deletedAt IS NULL
+    MATCH p = (c:Concept {id: $id})-[*1..${d}]-(m:Concept)
+    WHERE m.id <> $id
+      AND all(n IN nodes(p) WHERE n:Concept AND n.deletedAt IS NULL)
     WITH DISTINCT m
     OPTIONAL MATCH (m)-[:PART_OF]->(t:Topic)
     RETURN m AS concept, collect(DISTINCT t.name) AS topics
@@ -419,6 +429,144 @@ export async function getNeighbourhood(
   }));
 
   return { center, nodes, edges, truncated };
+}
+
+/** How a note hangs off the one before it, so the reader is never dropped in. */
+export interface ReadingVia {
+  id: string;
+  name: string;
+  type: RelType;
+  /** True when the relationship points INTO this note, from the other one. */
+  incoming: boolean;
+}
+
+export interface ReadingItem {
+  concept: Concept;
+  /** 1, 2 or 3 links from the centre. */
+  hop: number;
+  via: ReadingVia | null;
+}
+
+export interface NeighbourhoodNotes {
+  center: Concept;
+  items: ReadingItem[];
+  /** True when the cap, not the graph, is why the walk stopped. */
+  truncated: boolean;
+}
+
+/**
+ * The notes around a note, in reading order.
+ *
+ * `getNeighbourhood` answers what the picture should look like; this answers
+ * what to read, which is a different question. It carries the bodies, it
+ * knows how far out each note is, and it says what connects each one to the
+ * note before it.
+ *
+ * Done as ONE QUERY PER HOP over the frontier rather than a variable-length
+ * match or shortestPath. Longer, and worth it three times over: the hop
+ * number is exact rather than inferred from a path length, each round is
+ * bounded by what is left of the cap instead of hoping a global LIMIT lands
+ * somewhere sensible, and the `(m:Concept)` label on the far end makes the
+ * Concept -> Topic -> Concept leak impossible by construction rather than by
+ * a predicate someone has to remember.
+ */
+export async function neighbourhoodNotes(
+  id: string,
+  depth = 1,
+  limit = 40,
+): Promise<NeighbourhoodNotes | null> {
+  const center = await getConcept(id);
+  if (!center) return null;
+
+  const d = Math.max(1, Math.min(3, Math.trunc(depth) || 1));
+  const cap = Math.max(1, Math.min(200, Math.trunc(limit) || 40));
+
+  const items: ReadingItem[] = [];
+  const seen = new Set<string>([center.id]);
+  let frontier = [center.id];
+  let truncated = false;
+
+  for (let hop = 1; hop <= d && frontier.length > 0; hop++) {
+    const remaining = cap - items.length;
+    if (remaining <= 0) {
+      truncated = true;
+      break;
+    }
+
+    // One over the cap, so overflow is detected without a counting query.
+    const result = await read(
+      `
+      MATCH (a:Concept)-[r]-(m:Concept)
+      WHERE a.id IN $frontier AND NOT m.id IN $seen
+        AND a.deletedAt IS NULL AND m.deletedAt IS NULL
+        AND type(r) IN $types
+      WITH m, a, r
+      ORDER BY a.name ASC, type(r) ASC
+      WITH m, collect({
+        id: a.id, name: a.name, type: type(r),
+        incoming: endNode(r).id = m.id
+      })[0] AS via
+      WITH m, via, count{ (m)-[]-(x:Concept) WHERE x.deletedAt IS NULL } AS degree
+      ORDER BY degree DESC, m.name ASC
+      LIMIT $take
+      OPTIONAL MATCH (m)-[:PART_OF]->(t:Topic)
+      RETURN m AS concept, via, collect(DISTINCT t.name) AS topics
+      `,
+      {
+        frontier,
+        seen: [...seen],
+        types: [...REL_TYPES],
+        take: int(remaining + 1),
+      },
+    );
+
+    const records = result.records;
+    // The cap bit. Which notes survive it was decided by degree above, so
+    // what you lose is the periphery rather than an arbitrary slice.
+    const kept = records.length > remaining ? records.slice(0, remaining) : records;
+    if (records.length > remaining) truncated = true;
+
+    const next: string[] = [];
+    for (const record of kept) {
+      const concept = toConcept(
+        (record.get("concept") as { properties: ConceptProps }).properties,
+        record.get("topics") as string[],
+      );
+      const raw = record.get("via") as
+        | { id: unknown; name: unknown; type: unknown; incoming: unknown }
+        | null;
+
+      items.push({
+        concept,
+        hop,
+        via: raw
+          ? {
+              id: String(raw.id),
+              name: String(raw.name),
+              type: String(raw.type) as RelType,
+              incoming: Boolean(raw.incoming),
+            }
+          : null,
+      });
+      seen.add(concept.id);
+      next.push(concept.id);
+    }
+
+    if (truncated) break;
+    frontier = next;
+  }
+
+  // Reading order, which is not the order the cap was decided in: by hop,
+  // then grouped under the note each one hangs off, so related notes arrive
+  // together instead of interleaved by popularity.
+  items.sort(
+    (a, b) =>
+      a.hop - b.hop ||
+      (a.via?.name ?? "").localeCompare(b.via?.name ?? "") ||
+      a.concept.name.localeCompare(b.concept.name),
+  );
+
+  return { center, items, truncated };
 }
 
 /**
@@ -1084,8 +1232,8 @@ export async function setConceptFlags(
 export interface FullGraphNode {
   id: string;
   name: string;
-  /** First topic alphabetically, used only to colour the node. */
-  topic: string | null;
+  /** Every topic this concept carries, sorted. */
+  topics: string[];
   degree: number;
   tracked: boolean;
   flagged: boolean;
@@ -1142,11 +1290,13 @@ export async function fullGraph(limit = 1500): Promise<FullGraph> {
   const nodes: FullGraphNode[] = nodeResult.records.map((r) => ({
     id: String(r.get("id")),
     name: String(r.get("name")),
-    // One topic per node, because the node gets one colour. Sorted so the
-    // same concept keeps the same colour between loads even if the database
-    // returns its topics in a different order. Sorting here rather than in
-    // Cypher avoids depending on APOC, which Community does not ship.
-    topic: [...((r.get("topics") as string[]) ?? [])].sort()[0] ?? null,
+    // All of them. This used to keep only the alphabetically first topic,
+    // which was what the canvas coloured by: with two to four topics on
+    // almost every concept, that amounted to colouring by alphabet. Colour
+    // now comes from the link clusters, and the full list is what lets a
+    // cluster be labelled with the topic that is over-represented in it.
+    // Sorted here rather than in Cypher, which would need APOC.
+    topics: [...((r.get("topics") as string[]) ?? [])].sort(),
     degree: num(r.get("degree")),
     tracked: Boolean(r.get("tracked")),
     flagged: Boolean(r.get("flagged")),
