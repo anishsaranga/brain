@@ -65,6 +65,12 @@ export default async function ConceptPage({
   // neighbourhood is already capped at 100 nodes, so a count above the
   // reading cap is the only case where the two numbers can disagree.
   const around = hood?.nodes.length ?? 0;
+  const readLabel =
+    around > READING_CAP
+      ? `Read the ${READING_CAP} nearest notes`
+      : around === 1
+        ? "Read the one note"
+        : `Read all ${around} notes`;
 
   // Nearest concepts that are not already linked: the antidote to a graph of
   // disconnected per-conversation islands.
@@ -145,11 +151,7 @@ export default async function ConceptPage({
 
           {around > 0 && (
             <Link href={`/c/${concept.id}/read?depth=${depth}`} className={styles.read}>
-              <span>
-                {around > READING_CAP
-                  ? `Read the ${READING_CAP} nearest notes`
-                  : `Read all ${around} ${around === 1 ? "note" : "notes"}`}
-              </span>
+              <span>{readLabel}</span>
               <span className={styles.readArrow} aria-hidden="true">
                 →
               </span>
