@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { read, write, int } from "@/lib/neo4j";
+import { cluster, describeClusters } from "@/lib/clusters";
 import { embed, embeddingHash, embeddingText, EMBEDDING_MODEL, EMBEDDING_VERSION } from "@/lib/embeddings";
 
 /**
@@ -442,8 +443,11 @@ export interface ReadingVia {
 
 export interface ReadingItem {
   concept: Concept;
-  /** 1, 2 or 3 links from the centre. */
-  hop: number;
+  /**
+   * Links from the centre. Null only in a cluster read, for a member that no
+   * link inside the cluster reaches.
+   */
+  hop: number | null;
   via: ReadingVia | null;
 }
 
@@ -570,7 +574,7 @@ export async function neighbourhoodNotes(
   // together instead of interleaved by popularity.
   items.sort(
     (a, b) =>
-      a.hop - b.hop ||
+      (a.hop ?? 0) - (b.hop ?? 0) ||
       (a.via?.name ?? "").localeCompare(b.via?.name ?? "") ||
       a.concept.name.localeCompare(b.concept.name),
   );
@@ -1668,5 +1672,131 @@ export async function navCounts(): Promise<NavCounts> {
     orphans: num(r?.get("orphans")),
     flagged: num(r?.get("flagged")),
     trash: num(r?.get("trash")),
+  };
+}
+
+export interface ClusterNotes extends NeighbourhoodNotes {
+  /** Members of the whole cluster, the centre included, before any cap. */
+  size: number;
+  /** How the legend names this cluster: its landmark, and its stand-out topic. */
+  label: { name: string; topic: string | null };
+}
+
+/**
+ * Every note in one link community, in an order you can read.
+ *
+ * The communities are not stored anywhere. They are found by `clusters.ts`
+ * from the link structure, and the canvas finds them in the browser. Rather
+ * than shipping a list of thirty ids through a URL so the server can be told
+ * what the browser decided, this recomputes them: `cluster` is a pure
+ * function of the graph and `fullGraph` is what the canvas was given, so the
+ * same input produces the same grouping on both sides. The page and the
+ * picture agree because they did the same arithmetic, not because one
+ * trusted the other.
+ *
+ * Order is breadth-first from the note you asked about, following only links
+ * that stay inside the community, so you start where you are and work out.
+ * A member no intra-community link reaches gets `hop: null` and comes last;
+ * modularity does not promise a connected community, only a dense one.
+ */
+export async function clusterNotes(
+  id: string,
+  limit = READING_CAP,
+): Promise<ClusterNotes | null> {
+  const center = await getConcept(id);
+  if (!center) return null;
+
+  const graph = await fullGraph();
+  const clustering = cluster(graph.nodes, graph.edges);
+  const index = clustering.of.get(center.id);
+  // Not in the clustered slice: the graph was over the cap and this note was
+  // outside it. There is no community to read, which the caller must handle.
+  if (index === undefined) return null;
+
+  const members = new Set(clustering.clusters[index]);
+  const info = describeClusters(graph.nodes, clustering)[index];
+  const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+
+  // Adjacency inside the community only. `incoming` is relative to the note
+  // being reached, not the one being expanded from — it answers "which way
+  // does this point at me", which is what the relation line prints.
+  const links = new Map<string, Array<{ to: string; via: ReadingVia }>>();
+  const add = (from: string, to: string, type: RelType, incoming: boolean) => {
+    const parent = nodeById.get(from);
+    if (!parent) return;
+    const list = links.get(from) ?? [];
+    list.push({ to, via: { id: from, name: parent.name, type, incoming } });
+    links.set(from, list);
+  };
+  for (const e of graph.edges) {
+    if (!members.has(e.from) || !members.has(e.to)) continue;
+    add(e.from, e.to, e.type, true);
+    add(e.to, e.from, e.type, false);
+  }
+
+  // Busiest first at every step, then alphabetical: the same tie-break the
+  // hop walk uses, so the two reading orders feel like one thing.
+  const rank = (a: string, b: string) => {
+    const na = nodeById.get(a);
+    const nb = nodeById.get(b);
+    return (nb?.degree ?? 0) - (na?.degree ?? 0) || (na?.name ?? "").localeCompare(nb?.name ?? "");
+  };
+
+  const order: Array<{ id: string; hop: number | null; via: ReadingVia | null }> = [];
+  const seen = new Set<string>([center.id]);
+  let frontier = [center.id];
+
+  for (let hop = 1; frontier.length > 0; hop++) {
+    const found = new Map<string, ReadingVia>();
+    for (const from of [...frontier].sort(rank)) {
+      for (const edge of links.get(from) ?? []) {
+        if (seen.has(edge.to) || found.has(edge.to)) continue;
+        found.set(edge.to, edge.via);
+      }
+    }
+    const next = [...found.keys()].sort(rank);
+    for (const nid of next) {
+      seen.add(nid);
+      order.push({ id: nid, hop, via: found.get(nid)! });
+    }
+    frontier = next;
+  }
+
+  for (const nid of [...members].filter((m) => !seen.has(m)).sort(rank)) {
+    order.push({ id: nid, hop: null, via: null });
+  }
+
+  const cap = Math.max(1, Math.min(200, Math.trunc(limit) || READING_CAP));
+  const kept = order.slice(0, cap);
+
+  const bodies = await read(
+    `
+    MATCH (c:Concept) WHERE c.id IN $ids AND ${ALIVE}
+    OPTIONAL MATCH (c)-[:PART_OF]->(t:Topic)
+    RETURN c AS concept, collect(DISTINCT t.name) AS topics
+    `,
+    { ids: kept.map((k) => k.id) },
+  );
+  const conceptById = new Map(
+    bodies.records.map((r) => {
+      const concept = toConcept(
+        (r.get("concept") as { properties: ConceptProps }).properties,
+        r.get("topics") as string[],
+      );
+      return [concept.id, concept];
+    }),
+  );
+
+  const items: ReadingItem[] = kept.flatMap((k) => {
+    const concept = conceptById.get(k.id);
+    return concept ? [{ concept, hop: k.hop, via: k.via }] : [];
+  });
+
+  return {
+    center,
+    items,
+    truncated: order.length > kept.length,
+    size: members.size,
+    label: { name: info?.name ?? center.name, topic: info?.topic ?? null },
   };
 }

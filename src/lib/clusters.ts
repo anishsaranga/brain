@@ -346,3 +346,88 @@ function finalise(ids: string[], membership: number[], resolution: number): Clus
 
   return { of, clusters, resolution };
 }
+
+/** What naming a cluster needs to know about a node. */
+export interface DescribeNodeInput {
+  id: string;
+  name: string;
+  topics: string[];
+  degree: number;
+}
+
+export interface ClusterInfo {
+  index: number;
+  size: number;
+  /** The highest-degree member: the cluster's landmark, and its name. */
+  anchorId: string;
+  name: string;
+  /** The topic most over-represented here, or null if nothing stands out. */
+  topic: string | null;
+}
+
+/**
+ * Give each cluster a name and a topic.
+ *
+ * The name is its busiest member, because that is what you would point at to
+ * say where you are. The topic is the one with the highest LIFT — its share
+ * inside the cluster over its share of the whole graph — not the most common
+ * one. Most common would answer `system-design` for six clusters out of nine,
+ * since that tag is on 61% of the graph; lift answers `oauth`, `consistency`,
+ * `dns`, which is the thing you wanted to know.
+ *
+ * Here rather than in the canvas because the reading page has to call a
+ * cluster by the same name the legend does. Two descriptions of one grouping
+ * is how the picture and the page start disagreeing about where you are.
+ */
+export function describeClusters(
+  nodes: DescribeNodeInput[],
+  clustering: Clustering,
+): ClusterInfo[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const graphShare = new Map<string, number>();
+  for (const n of nodes) {
+    for (const t of n.topics) graphShare.set(t, (graphShare.get(t) ?? 0) + 1);
+  }
+
+  return clustering.clusters.map((members, index) => {
+    const nodesIn = members.flatMap((id) => {
+      const n = byId.get(id);
+      return n ? [n] : [];
+    });
+
+    const anchor = nodesIn.reduce(
+      (best: DescribeNodeInput | null, n) =>
+        !best || n.degree > best.degree || (n.degree === best.degree && n.name < best.name)
+          ? n
+          : best,
+      null,
+    );
+
+    const counts = new Map<string, number>();
+    for (const n of nodesIn) {
+      for (const t of n.topics) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+
+    // At least two members, or a single note with a unique tag wins every
+    // time and the label says nothing about the cluster.
+    let topic: string | null = null;
+    let bestLift = 0;
+    for (const name of [...counts.keys()].sort()) {
+      const count = counts.get(name)!;
+      if (count < 2) continue;
+      const lift = count / nodesIn.length / ((graphShare.get(name) ?? 1) / nodes.length);
+      if (lift > bestLift) {
+        bestLift = lift;
+        topic = name;
+      }
+    }
+
+    return {
+      index,
+      size: members.length,
+      anchorId: anchor?.id ?? members[0] ?? "",
+      name: anchor?.name ?? "",
+      topic,
+    };
+  });
+}

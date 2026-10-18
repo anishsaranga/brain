@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { neighbourhoodNotes, READING_CAP, type ReadingItem } from "@/lib/graph";
+import {
+  neighbourhoodNotes,
+  clusterNotes,
+  READING_CAP,
+  type ReadingItem,
+} from "@/lib/graph";
 import { UNDIRECTED, relLabel } from "@/lib/rel-types";
 import { plainText } from "@/lib/markdown";
 import Markdown from "@/components/markdown";
@@ -15,12 +20,21 @@ const WORDS_PER_MINUTE = 220;
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ mode?: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
+  const { mode } = await searchParams;
   const notes = await neighbourhoodNotes(id, 1, 1);
-  return { title: notes ? `Around ${notes.center.name}` : "Not found" };
+  if (!notes) return { title: "Not found" };
+  return {
+    title:
+      mode === "cluster"
+        ? `Cluster around ${notes.center.name}`
+        : `Around ${notes.center.name}`,
+  };
 }
 
 /**
@@ -42,18 +56,27 @@ export default async function ReadPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ depth?: string }>;
+  searchParams: Promise<{ depth?: string; mode?: string }>;
 }) {
   const { id } = await params;
-  const { depth: rawDepth } = await searchParams;
+  const { depth: rawDepth, mode } = await searchParams;
   const depth = Math.max(1, Math.min(3, Number(rawDepth) || 1));
+  const wantsCluster = mode === "cluster";
 
-  const walk = await neighbourhoodNotes(id, depth, READING_CAP);
+  // A cluster read falls back to one hop rather than 404ing: the only way to
+  // have no cluster is for the graph to have outgrown the canvas cap, which
+  // is a fact about the graph, not a broken link.
+  const group = wantsCluster ? await clusterNotes(id, READING_CAP) : null;
+  const walk = group ?? (await neighbourhoodNotes(id, depth, READING_CAP));
   if (!walk) notFound();
 
+  const asCluster = group !== null;
   const { center, items, truncated } = walk;
 
-  const hops = [...new Set(items.map((i) => i.hop))].sort((a, b) => a - b);
+  // Hops ascending, and the unreachable members of a cluster last.
+  const hops = [...new Set(items.map((i) => i.hop))].sort(
+    (a, b) => (a ?? Infinity) - (b ?? Infinity),
+  );
   const words = [center.body, ...items.map((i) => i.concept.body)]
     .map((body) => plainText(body).split(/\s+/).filter(Boolean).length)
     .reduce((a, b) => a + b, 0);
@@ -62,7 +85,11 @@ export default async function ReadPage({
   return (
     <Page width="wide">
       <header className={styles.head}>
-        <p className={styles.eyebrow}>reading the neighbourhood</p>
+        <p className={styles.eyebrow}>
+          {asCluster
+            ? `reading the ${group.label.topic ?? "whole"} cluster`
+            : "reading the neighbourhood"}
+        </p>
         <h1 className={styles.title}>{center.name}</h1>
         <div className={styles.meta}>
           <span className={styles.hops}>
@@ -70,13 +97,21 @@ export default async function ReadPage({
               <Link
                 key={d}
                 href={`/c/${center.id}/read?depth=${d}`}
-                className={d === depth ? styles.hopOn : styles.hop}
-                aria-current={d === depth ? "true" : undefined}
+                className={!asCluster && d === depth ? styles.hopOn : styles.hop}
+                aria-current={!asCluster && d === depth ? "true" : undefined}
               >
                 {d}
               </Link>
             ))}
             <span className={styles.hopLabel}>hops</span>
+            <Link
+              href={`/c/${center.id}/read?mode=cluster`}
+              className={asCluster ? styles.hopOn : styles.hop}
+              aria-current={asCluster ? "true" : undefined}
+              title="Every note in the link community this one belongs to"
+            >
+              cluster
+            </Link>
           </span>
           <span className={styles.count}>
             {items.length + 1} {items.length === 0 ? "note" : "notes"} · about {minutes} min
@@ -87,13 +122,26 @@ export default async function ReadPage({
         </div>
       </header>
 
-      {truncated && (
+      {wantsCluster && !asCluster && (
         <Note>
-          Showing the {items.length} best connected within {depth}{" "}
-          {depth === 1 ? "hop" : "hops"}. There are more; read at one hop fewer to see a
-          whole neighbourhood rather than part of a wider one.
+          The graph is larger than the canvas groups at once, so this note is not in
+          any cluster. Showing one hop around it instead.
         </Note>
       )}
+
+      {truncated &&
+        (asCluster ? (
+          <Note>
+            Showing {items.length} of the {group.size} notes in this cluster, the best
+            connected first.
+          </Note>
+        ) : (
+          <Note>
+            Showing the {items.length} best connected within {depth}{" "}
+            {depth === 1 ? "hop" : "hops"}. There are more; read at one hop fewer to see a
+            whole neighbourhood rather than part of a wider one.
+          </Note>
+        ))}
 
       <div className={styles.columns}>
         <div className={styles.main}>
@@ -115,11 +163,9 @@ export default async function ReadPage({
             </Empty>
           ) : (
             hops.map((hop) => (
-              <section key={hop} className={styles.hopSection}>
-                <h2 className={styles.hopTitle} id={`hop-${hop}`}>
-                  <span>
-                    {hop} {hop === 1 ? "hop" : "hops"} away
-                  </span>
+              <section key={hop ?? "rest"} className={styles.hopSection}>
+                <h2 className={styles.hopTitle} id={`hop-${hop ?? "rest"}`}>
+                  <span>{hopTitle(hop)}</span>
                   <span className={styles.hopCount}>
                     {items.filter((i) => i.hop === hop).length}
                   </span>
@@ -153,7 +199,7 @@ export default async function ReadPage({
         </div>
 
         <aside className={styles.toc} aria-label="The notes in this walk">
-          <p className={styles.tocHead}>In this walk</p>
+          <p className={styles.tocHead}>{asCluster ? "In this cluster" : "In this walk"}</p>
           <ol className={styles.tocList}>
             <li>
               <a href={`#n-${center.id}`} className={styles.tocCentre}>
@@ -161,9 +207,9 @@ export default async function ReadPage({
               </a>
             </li>
             {hops.map((hop) => (
-              <li key={hop}>
-                <a href={`#hop-${hop}`} className={styles.tocHop}>
-                  {hop} {hop === 1 ? "hop" : "hops"} away
+              <li key={hop ?? "rest"}>
+                <a href={`#hop-${hop ?? "rest"}`} className={styles.tocHop}>
+                  {hopTitle(hop)}
                 </a>
                 <ol className={styles.tocList}>
                   {items
@@ -183,6 +229,18 @@ export default async function ReadPage({
       </div>
     </Page>
   );
+}
+
+/**
+ * What a group of notes is, said in the fewest words that stay true.
+ *
+ * A cluster member with no hop number is one that no link inside the cluster
+ * reaches — modularity promises a dense community, not a connected one — so
+ * it cannot claim a distance it does not have.
+ */
+function hopTitle(hop: number | null): string {
+  if (hop === null) return "also in this cluster";
+  return `${hop} ${hop === 1 ? "hop" : "hops"} away`;
 }
 
 function Topics({ topics }: { topics: string[] }) {

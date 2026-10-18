@@ -136,6 +136,41 @@
   padding: 0;
 }
 
+/*
+ * The row is the isolate button plus a way out of the picture entirely.
+ *
+ * Two controls rather than one: a cluster is both something to look at and
+ * something to read, and the last two of these that were folded into an
+ * existing control went unfound for weeks. So `read` is always on screen at
+ * this width, quiet until you reach for it.
+ */
+.legendRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.legendRead {
+  flex: none;
+  padding: 0.22rem 0.4rem;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-decoration: none;
+  opacity: 0.75;
+  transition:
+    color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease),
+    opacity var(--fast) var(--ease);
+}
+
+.legendRow:hover .legendRead,
+.legendRead:focus-visible {
+  color: var(--accent);
+  background: var(--accent-wash);
+  opacity: 1;
+}
+
 .legendItem {
   display: grid;
   width: 100%;
@@ -266,11 +301,27 @@
     gap: var(--s2);
   }
 
+  .legendRow {
+    flex: none;
+    grid-template-columns: auto;
+  }
+
   .legendItem {
     flex: none;
     /* The 1fr track above resolves to zero inside a flex: none item, which
        left each chip as a dot and a number with no name at all. */
     grid-template-columns: auto max-content auto;
+  }
+
+  /* A read link on every chip would double the width of a strip that is
+     already the width of the phone. It appears on the one you have tapped. */
+  .legendRead {
+    display: none;
+    text-align: center;
+  }
+
+  .legendRowOn .legendRead {
+    display: block;
   }
 
   .legendName {

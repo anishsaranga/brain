@@ -18,7 +18,7 @@
  */
 import assert from "node:assert/strict";
 
-const { cluster, clusterAt } = await import("@/lib/clusters");
+const { cluster, clusterAt, describeClusters } = await import("@/lib/clusters");
 
 let passed = 0;
 let failed = 0;
@@ -236,6 +236,68 @@ check("a large graph with real structure keeps the base resolution", () => {
   const result = cluster(nodes, edges);
   assert.equal(result.resolution, 1);
   assert.equal(result.clusters.length, 8, JSON.stringify(shape(result)));
+});
+
+section("describeClusters");
+
+/** Two cliques: one tagged mostly `auth`, one mostly `dsa`, both tagged `notes`. */
+function tagged() {
+  const nodes = [
+    { id: "a1", name: "OAuth", topics: ["auth", "notes"], degree: 9 },
+    { id: "a2", name: "Tokens", topics: ["auth", "notes"], degree: 2 },
+    { id: "a3", name: "Scopes", topics: ["auth", "notes"], degree: 2 },
+    { id: "b1", name: "Graphs", topics: ["dsa", "notes"], degree: 3 },
+    { id: "b2", name: "Trees", topics: ["dsa", "notes"], degree: 2 },
+    { id: "b3", name: "Heaps", topics: ["dsa", "notes"], degree: 2 },
+  ];
+  const edges = [
+    { from: "a1", to: "a2" },
+    { from: "a2", to: "a3" },
+    { from: "a3", to: "a1" },
+    { from: "b1", to: "b2" },
+    { from: "b2", to: "b3" },
+    { from: "b3", to: "b1" },
+  ];
+  return { nodes, edges };
+}
+
+check("names a cluster after its busiest member", () => {
+  const { nodes, edges } = tagged();
+  const info = describeClusters(nodes, cluster(nodes, edges));
+  const auth = info.find((c) => c.anchorId === "a1");
+  assert.ok(auth, "the 9-degree node must anchor its own cluster");
+  assert.equal(auth.name, "OAuth");
+});
+
+check("labels with the stand-out topic, not the common one", () => {
+  const { nodes, edges } = tagged();
+  const info = describeClusters(nodes, cluster(nodes, edges));
+  assert.deepEqual(
+    info.map((c) => c.topic).sort(),
+    ["auth", "dsa"],
+    "`notes` is on every node, so it distinguishes nothing and must never win",
+  );
+});
+
+check("a topic held by one member is not a label", () => {
+  const nodes = [
+    { id: "a1", name: "One", topics: ["solo"], degree: 1 },
+    { id: "a2", name: "Two", topics: [], degree: 1 },
+  ];
+  const info = describeClusters(nodes, cluster(nodes, [{ from: "a1", to: "a2" }]));
+  assert.equal(info[0].topic, null, "one note with a unique tag says nothing about a group");
+});
+
+check("every cluster gets a description, in the same order", () => {
+  const { nodes, edges } = tagged();
+  const clustering = cluster(nodes, edges);
+  const info = describeClusters(nodes, clustering);
+  assert.equal(info.length, clustering.clusters.length);
+  info.forEach((c, i) => {
+    assert.equal(c.index, i);
+    assert.equal(c.size, clustering.clusters[i].length);
+    assert.ok(clustering.clusters[i].includes(c.anchorId));
+  });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

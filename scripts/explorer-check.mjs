@@ -771,6 +771,116 @@ await check("the prompt is written, kept, and only cleared on purpose", async ()
   assert.equal((await G.getConcept(ids.paxos)).prompt, null);
 });
 
+// ── Reading a whole cluster ──────────────────────────────────────────────────
+
+section("clusterNotes");
+
+/**
+ * Two cliques joined by a single bridge. Louvain splits this into two
+ * communities, which is the shape the reading page has to get right: the
+ * bridge must not drag the other side in.
+ */
+async function twoCliques() {
+  await reset();
+  const mk = (name) => G.upsertConcept({ name, body: `Body of ${name}.` });
+  const a = [await mk("A1"), await mk("A2"), await mk("A3"), await mk("A4")];
+  const b = [await mk("B1"), await mk("B2"), await mk("B3"), await mk("B4")];
+
+  for (const side of [a, b]) {
+    for (let i = 0; i < side.length; i++) {
+      for (let j = i + 1; j < side.length; j++) {
+        await G.linkConcepts(side[i].id, side[j].id, "RELATED_TO");
+      }
+    }
+  }
+  await G.linkConcepts(a[0].id, b[0].id, "RELATED_TO");
+
+  return {
+    a: a.map((c) => c.id),
+    b: b.map((c) => c.id),
+    nameOf: new Map([...a, ...b].map((c) => [c.id, c.name])),
+  };
+}
+
+await check("reads one community and stops at the bridge", async () => {
+  const { a, b } = await twoCliques();
+
+  const got = await G.clusterNotes(a[1]);
+  const ids = [got.center.id, ...got.items.map((i) => i.concept.id)].sort();
+  assert.deepEqual(ids, [...a].sort(), "the far clique is one link away and must not appear");
+  assert.equal(got.size, 4);
+  assert.equal(got.truncated, false);
+  assert.ok(
+    b.every((id) => !got.items.some((i) => i.concept.id === id)),
+    "a bridge is not membership",
+  );
+});
+
+await check("the centre is the note you asked for, not the cluster's landmark", async () => {
+  const { a } = await twoCliques();
+  const got = await G.clusterNotes(a[3]);
+  assert.equal(got.center.id, a[3]);
+  assert.ok(!got.items.some((i) => i.concept.id === a[3]), "the centre is not also an item");
+});
+
+await check("notes arrive with their bodies and their relation", async () => {
+  const { a } = await twoCliques();
+  const got = await G.clusterNotes(a[0]);
+
+  for (const item of got.items) {
+    assert.ok(item.concept.body.length > 0, "a reading view with no prose is a list");
+    assert.equal(item.hop, 1, "everything in a clique is one link from everything else");
+    assert.ok(item.via, "every note reached through a link can say which link");
+    assert.equal(item.via.type, "RELATED_TO");
+  }
+});
+
+await check("the same graph gives the same reading twice", async () => {
+  const { a } = await twoCliques();
+  const first = await G.clusterNotes(a[0]);
+  const second = await G.clusterNotes(a[0]);
+  assert.deepEqual(
+    first.items.map((i) => [i.concept.id, i.hop]),
+    second.items.map((i) => [i.concept.id, i.hop]),
+    "the page recomputes the grouping the canvas drew; drift means they disagree",
+  );
+});
+
+await check("the cap reports itself", async () => {
+  const { a } = await twoCliques();
+  const got = await G.clusterNotes(a[0], 2);
+  assert.equal(got.items.length, 2);
+  assert.equal(got.truncated, true);
+  assert.equal(got.size, 4, "size is the cluster, not the page");
+});
+
+await check("a tombstone is neither centre nor member", async () => {
+  const { a } = await twoCliques();
+  await G.softDeleteConcept(a[3]);
+
+  assert.equal(await G.clusterNotes(a[3]), null);
+
+  const got = await G.clusterNotes(a[0]);
+  assert.ok(
+    !got.items.some((i) => i.concept.id === a[3]),
+    "fullGraph filters the deleted, so the clustering never sees them",
+  );
+});
+
+await check("an unlinked note is a cluster of one", async () => {
+  await reset();
+  const lone = await G.upsertConcept({ name: "Lone", body: "No links." });
+  const got = await G.clusterNotes(lone.id);
+  assert.equal(got.center.id, lone.id);
+  assert.deepEqual(got.items, []);
+  assert.equal(got.size, 1);
+});
+
+await check("an unknown id is null rather than a crash", async () => {
+  await twoCliques();
+  assert.equal(await G.clusterNotes("00000000-0000-0000-0000-000000000000"), null);
+});
+
 // ── Teardown ─────────────────────────────────────────────────────────────────
 
 await getDriver().close();

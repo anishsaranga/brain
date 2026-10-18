@@ -1,10 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import cytoscape from "cytoscape";
 import fcose from "cytoscape-fcose";
-import { cluster, type Clustering } from "@/lib/clusters";
+import {
+  cluster,
+  describeClusters,
+  type Clustering,
+} from "@/lib/clusters";
 import { UNDIRECTED, type RelType } from "@/lib/rel-types";
 import { themeColors, watchTheme, isDarkTheme } from "@/lib/theme-colors";
 import styles from "./full-graph.module.css";
@@ -81,74 +86,6 @@ function clusterColor(index: number, dark: boolean, muted: string): string {
   const usable = 360 - ACCENT_GUARD * 2;
   const hue = Math.round(((index * usable) / PALETTE + ACCENT_HUE + ACCENT_GUARD) % 360);
   return dark ? `hsl(${hue}, 55%, 64%)` : `hsl(${hue}, 58%, 36%)`;
-}
-
-interface ClusterInfo {
-  index: number;
-  size: number;
-  /** The highest-degree member: the cluster's landmark, and its name. */
-  anchorId: string;
-  name: string;
-  /** The topic most over-represented here, or null if nothing stands out. */
-  topic: string | null;
-}
-
-/**
- * Give each cluster a name and a topic.
- *
- * The name is its busiest member, because that is what you would point at to
- * say where you are. The topic is the one with the highest LIFT — its share
- * inside the cluster over its share of the whole graph — not the most common
- * one. Most common would answer `system-design` for six clusters out of nine,
- * since that tag is on 61% of the graph; lift answers `oauth`, `consistency`,
- * `dns`, which is the thing you wanted to know.
- */
-function describeClusters(nodes: Node[], clustering: Clustering): ClusterInfo[] {
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const graphShare = new Map<string, number>();
-  for (const n of nodes) {
-    for (const t of n.topics) graphShare.set(t, (graphShare.get(t) ?? 0) + 1);
-  }
-
-  return clustering.clusters.map((members, index) => {
-    const nodesIn = members.flatMap((id) => {
-      const n = byId.get(id);
-      return n ? [n] : [];
-    });
-
-    const anchor = nodesIn.reduce((best, n) =>
-      !best || n.degree > best.degree || (n.degree === best.degree && n.name < best.name)
-        ? n
-        : best,
-    );
-
-    const counts = new Map<string, number>();
-    for (const n of nodesIn) {
-      for (const t of n.topics) counts.set(t, (counts.get(t) ?? 0) + 1);
-    }
-
-    // At least two members, or a single note with a unique tag wins every
-    // time and the label says nothing about the cluster.
-    let topic: string | null = null;
-    let bestLift = 0;
-    for (const name of [...counts.keys()].sort()) {
-      const count = counts.get(name)!;
-      if (count < 2) continue;
-      const lift = count / nodesIn.length / ((graphShare.get(name) ?? 1) / nodes.length);
-      if (lift > bestLift) {
-        bestLift = lift;
-        topic = name;
-      }
-    }
-
-    return {
-      index,
-      size: members.length,
-      anchorId: anchor.id,
-      name: anchor.name,
-      topic,
-    };
-  });
 }
 
 /**
@@ -660,7 +597,12 @@ export default function FullGraph() {
         <div className={styles.legend}>
           <ul className={styles.legendList}>
             {shown.map((c) => (
-              <li key={c.index}>
+              <li
+                key={c.index}
+                className={`${styles.legendRow} ${
+                  isolated === c.index ? styles.legendRowOn : ""
+                }`}
+              >
                 <button
                   type="button"
                   className={`${styles.legendItem} ${isolated === c.index ? styles.legendOn : ""}`}
@@ -682,6 +624,17 @@ export default function FullGraph() {
                   </span>
                   <span className={styles.legendCount}>{c.size}</span>
                 </button>
+                <Link
+                  href={`/c/${c.anchorId}/read?mode=cluster`}
+                  className={styles.legendRead}
+                  title={`Read all ${c.size} notes in this cluster`}
+                  onMouseEnter={() => setPreview(c.index)}
+                  onMouseLeave={() => setPreview((p) => (p === c.index ? null : p))}
+                  onFocus={() => setPreview(c.index)}
+                  onBlur={() => setPreview((p) => (p === c.index ? null : p))}
+                >
+                  read
+                </Link>
               </li>
             ))}
           </ul>
