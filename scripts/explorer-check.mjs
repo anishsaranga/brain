@@ -692,6 +692,85 @@ await check("a concept-to-concept PART_OF still counts as a link", async () => {
   assert.deepEqual(hood.nodes.map((n) => n.id), [whole.id]);
 });
 
+// ── Enrolling a note in review ───────────────────────────────────────────────
+
+section("setTracked");
+
+await check("enrols an untracked concept, and takes it out again", async () => {
+  const ids = await fixture();
+
+  const on = await G.setTracked(ids.paxos, true);
+  assert.deepEqual(on, { tracked: true, prompt: null });
+  assert.equal((await G.getConcept(ids.paxos)).tracked, true);
+
+  const off = await G.setTracked(ids.paxos, false);
+  assert.equal(off.tracked, false);
+  assert.equal((await G.getConcept(ids.paxos)).tracked, false);
+});
+
+await check("enrolling writes no revision", async () => {
+  const ids = await fixture();
+  const before = await G.getRevisions(ids.paxos);
+
+  await G.setTracked(ids.paxos, true, { prompt: "What does Paxos guarantee?" });
+
+  const after = await G.getRevisions(ids.paxos);
+  assert.deepEqual(
+    after,
+    before,
+    "tracking is not an edit; the editor's Save keeps history, this must not",
+  );
+});
+
+await check("enrolling does not disturb the embedding", async () => {
+  const ids = await fixture();
+  const hashOf = async (id) => {
+    const r = await read("MATCH (c:Concept {id: $id}) RETURN c.textHash AS h", { id });
+    return r.records[0].get("h");
+  };
+  const before = await hashOf(ids.paxos);
+
+  await G.setTracked(ids.paxos, true, { prompt: "Why a majority?" });
+
+  assert.equal(
+    await hashOf(ids.paxos),
+    before,
+    "the prompt is not part of the embedded text, so the hash must not move",
+  );
+});
+
+await check("a tombstone cannot be put into review", async () => {
+  const ids = await fixture();
+  await G.softDeleteConcept(ids.stale);
+
+  assert.equal(await G.setTracked(ids.stale, true), null);
+
+  const raw = await read("MATCH (c:Concept {id: $id}) RETURN c.tracked AS t", {
+    id: ids.stale,
+  });
+  assert.notEqual(raw.records[0].get("t"), true, "a note you threw away is not a card");
+});
+
+await check("an unknown id returns null rather than throwing", async () => {
+  await fixture();
+  assert.equal(await G.setTracked("00000000-0000-0000-0000-000000000000", true), null);
+});
+
+await check("the prompt is written, kept, and only cleared on purpose", async () => {
+  const ids = await fixture();
+
+  await G.setTracked(ids.paxos, true, { prompt: "  Why a majority?  " });
+  assert.equal((await G.getConcept(ids.paxos)).prompt, "  Why a majority?  ");
+
+  // Omitting it must leave it alone, or toggling off and on would wipe it.
+  await G.setTracked(ids.paxos, false);
+  await G.setTracked(ids.paxos, true);
+  assert.equal((await G.getConcept(ids.paxos)).prompt, "  Why a majority?  ");
+
+  await G.setTracked(ids.paxos, true, { prompt: null });
+  assert.equal((await G.getConcept(ids.paxos)).prompt, null);
+});
+
 // ── Teardown ─────────────────────────────────────────────────────────────────
 
 await getDriver().close();

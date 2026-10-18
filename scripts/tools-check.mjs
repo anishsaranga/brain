@@ -735,6 +735,27 @@ await check("update_concept is still how you stop tracking", async () => {
   assert.equal(r.records[0].get("t"), false);
 });
 
+await check("a note tracked from the UI shows up in the queue immediately", async () => {
+  // The payoff for the track control: enrolling is the whole of enrolling.
+  // A card with no review history has a null `due`, which counts as due, so
+  // there is nothing else to initialise and nothing to wait for.
+  await reset();
+  const res = await remember({ concepts: [{ name: "Vector clock", body: "Causality." }] });
+  const id = res.concepts[0].id;
+
+  assert.equal((await T.dueForReviewTool(20)).data.cards.length, 0);
+
+  const { setTracked } = await import("@/lib/graph");
+  await setTracked(id, true, { prompt: "What does a vector clock order?" });
+
+  const due = await T.dueForReviewTool(20);
+  assert.equal(due.data.cards.length, 1);
+  assert.equal(due.data.cards[0].id, id);
+
+  await setTracked(id, false);
+  assert.equal((await T.dueForReviewTool(20)).data.cards.length, 0, "and back out again");
+});
+
 // ── Teardown ─────────────────────────────────────────────────────────────────
 
 await getDriver().close();

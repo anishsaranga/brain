@@ -1238,6 +1238,49 @@ export async function setConceptFlags(
   return num(result.records[0]?.get("n")) > 0;
 }
 
+/**
+ * Enrol a concept in spaced repetition, or take it out again.
+ *
+ * Separate from `setConceptFlags`, which is scoped to flags, for two reasons.
+ *
+ * It can carry the review prompt, which is safe to write here and nowhere
+ * else cheap: `embeddingText` hashes name, aliases and body, so a prompt
+ * cannot invalidate an embedding, and `revisions` only ever records a
+ * superseded body. Enrolling a note is not editing it and must not leave a
+ * revision behind, which is exactly what going through `upsertConcept` —
+ * the editor's Save — would do.
+ *
+ * And it refuses a tombstone. `setConceptFlags` matches on id alone and will
+ * flag a soft-deleted concept quite happily; nothing downstream notices
+ * because every read filters `ALIVE`, but putting a note you have thrown away
+ * into the review queue is not a thing to allow quietly.
+ *
+ * `null` means no live concept has that id, so a caller can tell that apart
+ * from a write that changed nothing.
+ */
+export async function setTracked(
+  id: string,
+  tracked: boolean,
+  { prompt }: { prompt?: string | null } = {},
+): Promise<{ tracked: boolean; prompt: string | null } | null> {
+  const patch: Record<string, unknown> = { tracked };
+  if (prompt !== undefined) patch.prompt = prompt;
+
+  const result = await write(
+    `
+    MATCH (c:Concept {id: $id})
+    WHERE ${ALIVE}
+    SET c += $patch, c.updatedAt = datetime()
+    RETURN c.tracked AS tracked, c.prompt AS prompt
+    `,
+    { id, patch },
+  );
+
+  const rec = result.records[0];
+  if (!rec) return null;
+  return { tracked: Boolean(rec.get("tracked")), prompt: str(rec.get("prompt")) };
+}
+
 export interface FullGraphNode {
   id: string;
   name: string;
