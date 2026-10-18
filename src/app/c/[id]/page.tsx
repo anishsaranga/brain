@@ -132,6 +132,12 @@ export default async function ConceptPage({
             </span>
           </div>
 
+          {nodes.length > 1 && (
+            <Link href={`/c/${concept.id}/read?depth=${depth}`} className={styles.read}>
+              Read all {depth === 1 ? "of it" : `${depth} hops`} →
+            </Link>
+          )}
+
           {nodes.length <= 1 ? (
             <div className={styles.emptyGraph}>
               Nothing links here yet. An unconnected note is a folder with extra

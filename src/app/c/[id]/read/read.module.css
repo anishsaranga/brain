@@ -1,0 +1,344 @@
+.head {
+  margin-bottom: var(--s5);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 var(--s2);
+}
+
+.title {
+  font-size: var(--step-4);
+  letter-spacing: -0.025em;
+  margin: 0 0 var(--s3);
+  overflow-wrap: break-word;
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s4);
+  font-size: var(--step--1);
+}
+
+/* The hop control reads the same here as on the concept page, because it is
+   the same control and switching between the two should feel like one thing. */
+.hops {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.hop,
+.hopOn {
+  font-family: var(--mono);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  text-decoration: none;
+  transition:
+    color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+
+.hop {
+  color: var(--muted);
+}
+
+.hop:hover {
+  color: var(--fg);
+  background: var(--bg-sunken);
+}
+
+.hopOn {
+  color: var(--accent);
+  background: var(--accent-wash);
+  font-weight: 600;
+}
+
+.hopLabel,
+.count {
+  color: var(--muted);
+}
+
+.count {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.back {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+}
+
+.back:hover {
+  color: var(--accent);
+  border-color: currentColor;
+}
+
+/*
+ * Prose on the left, contents on the right. The list sticks: forty notes is
+ * a long scroll and the point of the walk is that you can see where you are
+ * in it.
+ */
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15rem;
+  gap: var(--s6);
+  align-items: start;
+}
+
+.main {
+  min-width: 0;
+}
+
+/* ── The notes ────────────────────────────────────────────────────────────── */
+
+.centre,
+.note {
+  min-width: 0;
+  animation: fade var(--base) var(--ease) backwards;
+}
+
+/*
+ * The note you came from, set apart. It is not part of the walk, it is the
+ * thing the walk is around, and without the accent edge it reads as just
+ * another entry in a list of forty.
+ */
+.centre {
+  padding: var(--s4) var(--s5);
+  margin-bottom: var(--s6);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--bg-raised);
+}
+
+.centreTitle {
+  font-size: var(--step-2);
+  letter-spacing: -0.02em;
+  margin: 0 0 var(--s2);
+  overflow-wrap: break-word;
+}
+
+.hopSection {
+  margin-bottom: var(--s6);
+}
+
+/* A rule across the page with the hop written on it: hard to miss while
+   scrolling, and it is the one thing you need to keep track of. */
+.hopTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-family: var(--sans);
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--muted);
+  margin: 0 0 var(--s4);
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+
+.hopCount {
+  font-family: var(--mono);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.note {
+  padding-bottom: var(--s5);
+  margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+
+.note:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+
+.noteTitle {
+  font-size: var(--step-2);
+  letter-spacing: -0.02em;
+  margin: 0 0 var(--s2);
+  overflow-wrap: break-word;
+}
+
+.noteTitle a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.noteTitle a:hover {
+  color: var(--accent);
+}
+
+/* The relationship, as the triple it is. */
+.via {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0 0 var(--s3);
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+
+.viaName,
+.viaLink {
+  color: var(--fg);
+}
+
+.viaLink {
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+}
+
+.viaLink:hover {
+  color: var(--accent);
+  border-color: currentColor;
+}
+
+.viaRel {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.1em 0.45em;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+.topic {
+  display: inline-flex;
+  padding: 0.14em 0.5em;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
+}
+
+.topic:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+/* Prose stays at a readable measure even though the column is wider. */
+.body {
+  max-width: 68ch;
+}
+
+/* ── Contents ─────────────────────────────────────────────────────────────── */
+
+.toc {
+  position: sticky;
+  top: calc(64px + var(--s4));
+  max-height: calc(100dvh - 64px - 2 * var(--s4));
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  min-width: 0;
+  font-size: var(--step--1);
+}
+
+.tocHead {
+  font-family: var(--sans);
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0 0 var(--s3);
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+
+.tocList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.tocList .tocList {
+  margin: 0.15rem 0 var(--s3) var(--s3);
+  padding-left: var(--s3);
+  border-left: 1px solid var(--line);
+}
+
+.tocCentre,
+.tocHop,
+.tocLink {
+  display: block;
+  padding: 0.1rem 0;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--fast) var(--ease);
+}
+
+.tocCentre {
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: var(--s3);
+}
+
+.tocHop {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+
+.tocLink {
+  color: var(--muted);
+}
+
+.tocLink:hover,
+.tocHop:hover,
+.tocCentre:hover {
+  color: var(--fg);
+}
+
+/*
+ * On a narrow screen the contents go above the prose and stop sticking. A
+ * sticky block on a phone eats a third of the viewport for navigation you
+ * are not using while you read.
+ */
+@media (max-width: 960px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s5);
+  }
+
+  .toc {
+    position: static;
+    order: -1;
+    max-height: 18rem;
+  }
+
+  .centre {
+    padding: var(--s3) var(--s4);
+  }
+}

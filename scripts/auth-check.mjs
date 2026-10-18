@@ -509,6 +509,9 @@ await check("the matcher gates every page of the explorer", () => {
     "/ingest/39a6dc56-e1a9-4714-90b8-aebd8798f42c",
     "/hygiene",
     "/graph",
+    // The reading walk serves whole note bodies, several at a time: of every
+    // page here it is the one that leaks the most if the gate ever slips.
+    "/c/39a6dc56-e1a9-4714-90b8-aebd8798f42c/read",
     "/anything/we/add/later",
   ]) {
     assert.equal(gated(path), true, `${path} MUST be gated`);

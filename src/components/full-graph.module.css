@@ -13,17 +13,39 @@
 }
 
 /*
+ * A dot grid behind the graph, faded out towards the edges.
+ *
+ * Without it the canvas is an undifferentiated field and the nodes have
+ * nothing to sit on: panning feels like nothing is moving, because nothing
+ * is. The mask is what keeps it from reading as graph paper, and it is
+ * strictly decoration, so it sits under the canvas where it can never
+ * interfere with a hit test.
+ */
+.frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 30%, transparent 78%);
+  pointer-events: none;
+}
+
+/*
  * Absolute fill rather than `height: 100%`.
  *
  * The frame's height comes from `flex: 1 1 auto`, and a percentage height
  * resolves against a definite parent height, which a flex-basis:auto item
  * does not reliably have. It computed to 0: Cytoscape mounted, laid out all
- * 29 nodes, and drew them into a strip no pixels tall. Insetting against the
+ * the nodes, and drew them into a strip no pixels tall. Insetting against the
  * already-positioned frame sidesteps the question entirely.
  */
 .canvas {
   position: absolute;
   inset: 0;
+  z-index: 1;
 }
 
 /* ── Overlays ─────────────────────────────────────────────────────────────── */
@@ -87,32 +109,79 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Legend ───────────────────────────────────────────────────────────────── */
+
+/*
+ * The legend is the control surface, not a key. Each row isolates its
+ * cluster on hover and pins that on click, which is the difference between
+ * being told there are nine neighbourhoods and being able to look at one.
+ */
 .legend {
   position: absolute;
   z-index: 2;
   left: var(--s4);
   top: var(--s4);
-  display: grid;
-  gap: 0.3rem;
-  list-style: none;
-  margin: 0;
-  padding: var(--s3);
-  max-width: min(45%, 15rem);
+  padding: var(--s2);
+  max-width: min(48%, 17rem);
   max-height: calc(100% - 8rem);
   overflow-y: auto;
-  pointer-events: none;
+  overscroll-behavior: contain;
+}
+
+.legendList {
+  display: grid;
+  gap: 1px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .legendItem {
   display: grid;
+  width: 100%;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.45rem;
-  font-size: var(--step--1);
+  gap: 0.5rem;
+  padding: 0.22rem 0.35rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
   color: var(--muted);
+  transition:
+    background-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.legendItem:hover,
+.legendItem:focus-visible {
+  background: var(--bg-sunken);
+  color: var(--fg);
+}
+
+.legendOn {
+  background: var(--accent-wash);
+  color: var(--fg);
+}
+
+.legendText {
+  display: grid;
+  min-width: 0;
 }
 
 .legendName {
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The cluster's busiest concept: what you would point at to say where this
+   is. Quiet, because the topic above it is the label you read first. */
+.legendSub {
+  font-size: 0.68rem;
+  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -131,6 +200,15 @@
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
+
+.legendRest {
+  margin: 0.35rem 0 0.1rem;
+  padding: 0 0.35rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────────── */
 
 .controls {
   position: absolute;
@@ -156,17 +234,22 @@
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
+.control[aria-pressed="true"] {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: var(--accent-wash);
+}
+
 /*
- * On a phone the legend and the Fit button would sit side by side across a
+ * On a phone the legend and the buttons would sit side by side across a
  * 375px strip and crowd the canvas they are annotating. The legend goes
- * horizontal along the top instead, scrolling if there are more topics than
- * fit, and the Fit button keeps its corner.
+ * horizontal along the top instead, scrolling if there are more clusters than
+ * fit, and loses its second line. Tapping a chip isolates a cluster, which
+ * gives touch the thing hover gives the desktop.
  */
 @media (max-width: 640px) {
   .legend {
-    display: flex;
-    gap: var(--s3);
-    right: calc(var(--s4) + 3.6rem);
+    right: calc(var(--s4) + 7.4rem);
     max-width: none;
     max-height: none;
     overflow-x: auto;
@@ -178,12 +261,25 @@
     display: none;
   }
 
+  .legendList {
+    display: flex;
+    gap: var(--s2);
+  }
+
   .legendItem {
     flex: none;
+    /* The 1fr track above resolves to zero inside a flex: none item, which
+       left each chip as a dot and a number with no name at all. */
+    grid-template-columns: auto max-content auto;
   }
 
   .legendName {
     max-width: 7rem;
+  }
+
+  .legendSub,
+  .legendRest {
+    display: none;
   }
 
   .hud {

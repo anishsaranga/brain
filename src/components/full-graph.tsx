@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import cytoscape from "cytoscape";
 import fcose from "cytoscape-fcose";
+import { cluster, type Clustering } from "@/lib/clusters";
+import { UNDIRECTED, type RelType } from "@/lib/rel-types";
 import { themeColors, watchTheme, isDarkTheme } from "@/lib/theme-colors";
 import styles from "./full-graph.module.css";
 
@@ -12,7 +14,7 @@ cytoscape.use(fcose);
 interface Node {
   id: string;
   name: string;
-  topic: string | null;
+  topics: string[];
   degree: number;
   tracked: boolean;
   flagged: boolean;
@@ -21,7 +23,7 @@ interface Node {
 interface Link {
   from: string;
   to: string;
-  type: string;
+  type: RelType;
 }
 
 interface Data {
@@ -34,12 +36,12 @@ interface Data {
 /**
  * Deterministic 32-bit hash of a string.
  *
- * Used to seed each node's starting position. fcose with `randomize: false`
- * settles from wherever the nodes start, so seeding from the id means the
- * same graph lays out identically on every reload and on every machine.
- * Without it the layout reshuffles on each visit and the picture becomes
- * unreadable: spatial memory is most of what makes a graph view better than
- * a list, and it only exists if the shape holds still.
+ * Used to scatter a cluster's members around its centre. fcose with
+ * `randomize: false` settles from wherever the nodes start, so seeding from
+ * the id means the same graph lays out identically on every reload and on
+ * every machine. Without it the layout reshuffles on each visit and the
+ * picture becomes unreadable: spatial memory is most of what makes a graph
+ * view better than a list, and it only exists if the shape holds still.
  */
 function hash(value: string): number {
   let h = 2166136261;
@@ -51,46 +53,146 @@ function hash(value: string): number {
 }
 
 /**
- * A hue per topic, spread evenly around the wheel.
+ * A hue per cluster.
  *
- * Assigned by position in the sorted topic list rather than by hashing the
- * name. Hashing into a fixed palette looks stable but collides constantly at
- * these numbers: three topics into ten buckets collided on the first real
- * data, and two unrelated topics drawn in the same colour is worse than any
- * amount of reshuffling. Sorting keeps it deterministic, so a topic's colour
- * only moves when the set of topics changes, and the legend names them.
+ * Colour used to come from the node's alphabetically-first topic, which on
+ * this graph meant colouring by alphabet: almost every concept carries two to
+ * four topics, there are 95 of them, and the one broad enough to group things
+ * covered 128 of 211 concepts. Clusters are the honest grouping and there are
+ * usually under a dozen, which is a number of colours a person can actually
+ * hold apart.
  *
  * ACCENT_HUE is skipped because the accent is also the "tracked" ring. A
- * topic rendered in the same green made tracked and untracked nodes of that
- * topic impossible to tell apart.
- */
-const ACCENT_HUE = 152;
-const ACCENT_GUARD = 20;
-
-function buildTopicHues(topics: string[]): Map<string, number> {
-  const sorted = [...new Set(topics)].sort();
-  const hues = new Map<string, number>();
-  // Walk the wheel from an offset, skipping the band around the accent.
-  const usable = 360 - ACCENT_GUARD * 2;
-  sorted.forEach((topic, i) => {
-    const raw = (i * usable) / Math.max(1, sorted.length);
-    const hue = (raw + ACCENT_HUE + ACCENT_GUARD) % 360;
-    hues.set(topic, Math.round(hue));
-  });
-  return hues;
-}
-
-/**
+ * cluster drawn in the same green made tracked and untracked nodes of that
+ * cluster impossible to tell apart.
+ *
  * COMMAS ARE REQUIRED. Cytoscape's colour parser predates the space-separated
  * `hsl(H S% L%)` syntax and silently falls back to grey on it, with no warning
  * and no error: every node rendered the same grey while the legend, which is
  * ordinary CSS and does understand the modern form, showed the right colours.
- * The legend agreeing with nothing on the canvas is what made it hard to see.
  */
-function hueToColor(hue: number | undefined, dark: boolean): string | null {
-  if (hue === undefined) return null;
-  return dark ? `hsl(${hue}, 55%, 64%)` : `hsl(${hue}, 50%, 40%)`;
+const ACCENT_HUE = 152;
+const ACCENT_GUARD = 20;
+/** Clusters past this are drawn in muted grey rather than an 11th near-hue. */
+const PALETTE = 10;
+
+function clusterColor(index: number, dark: boolean, muted: string): string {
+  if (index >= PALETTE) return muted;
+  const usable = 360 - ACCENT_GUARD * 2;
+  const hue = Math.round(((index * usable) / PALETTE + ACCENT_HUE + ACCENT_GUARD) % 360);
+  return dark ? `hsl(${hue}, 55%, 64%)` : `hsl(${hue}, 58%, 36%)`;
 }
+
+interface ClusterInfo {
+  index: number;
+  size: number;
+  /** The highest-degree member: the cluster's landmark, and its name. */
+  anchorId: string;
+  name: string;
+  /** The topic most over-represented here, or null if nothing stands out. */
+  topic: string | null;
+}
+
+/**
+ * Give each cluster a name and a topic.
+ *
+ * The name is its busiest member, because that is what you would point at to
+ * say where you are. The topic is the one with the highest LIFT — its share
+ * inside the cluster over its share of the whole graph — not the most common
+ * one. Most common would answer `system-design` for six clusters out of nine,
+ * since that tag is on 61% of the graph; lift answers `oauth`, `consistency`,
+ * `dns`, which is the thing you wanted to know.
+ */
+function describeClusters(nodes: Node[], clustering: Clustering): ClusterInfo[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const graphShare = new Map<string, number>();
+  for (const n of nodes) {
+    for (const t of n.topics) graphShare.set(t, (graphShare.get(t) ?? 0) + 1);
+  }
+
+  return clustering.clusters.map((members, index) => {
+    const nodesIn = members.flatMap((id) => {
+      const n = byId.get(id);
+      return n ? [n] : [];
+    });
+
+    const anchor = nodesIn.reduce((best, n) =>
+      !best || n.degree > best.degree || (n.degree === best.degree && n.name < best.name)
+        ? n
+        : best,
+    );
+
+    const counts = new Map<string, number>();
+    for (const n of nodesIn) {
+      for (const t of n.topics) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+
+    // At least two members, or a single note with a unique tag wins every
+    // time and the label says nothing about the cluster.
+    let topic: string | null = null;
+    let bestLift = 0;
+    for (const name of [...counts.keys()].sort()) {
+      const count = counts.get(name)!;
+      if (count < 2) continue;
+      const lift = count / nodesIn.length / ((graphShare.get(name) ?? 1) / nodes.length);
+      if (lift > bestLift) {
+        bestLift = lift;
+        topic = name;
+      }
+    }
+
+    return {
+      index,
+      size: members.length,
+      anchorId: anchor.id,
+      name: anchor.name,
+      topic,
+    };
+  });
+}
+
+/**
+ * Starting positions: one cluster per neighbourhood, laid out apart.
+ *
+ * Centres go on a golden-angle spiral, which spreads any number of clusters
+ * evenly without the ring-of-k look and without anything to tune. Members
+ * scatter around their own centre by id hash, inside a radius that grows with
+ * the cluster, so a big cluster does not start as a pile.
+ *
+ * This is only the starting draft. What keeps the clusters apart after fcose
+ * has finished is the per-edge spring lengths below; seeding is what stops it
+ * having to find the arrangement from a standing start, which on a graph this
+ * connected it does not reliably do.
+ */
+function seedPositions(nodes: Node[], clustering: Clustering): Map<string, { x: number; y: number }> {
+  const k = Math.max(1, clustering.clusters.length);
+  const spread = 300 * Math.sqrt(k);
+  const positions = new Map<string, { x: number; y: number }>();
+
+  clustering.clusters.forEach((members, i) => {
+    const angle = i * 2.39996; // golden angle, in radians
+    const radius = spread * Math.sqrt((i + 0.5) / k);
+    const cx = Math.cos(angle) * radius;
+    const cy = Math.sin(angle) * radius;
+    const local = 40 + 22 * Math.sqrt(members.length);
+
+    for (const id of members) {
+      const h = hash(id);
+      const a = ((h % 10000) / 10000) * Math.PI * 2;
+      // sqrt keeps the scatter uniform over the disc instead of bunched in
+      // the middle.
+      const r = Math.sqrt(((h >>> 16) % 10000) / 10000) * local;
+      positions.set(id, { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+    }
+  });
+
+  for (const n of nodes) if (!positions.has(n.id)) positions.set(n.id, { x: 0, y: 0 });
+  return positions;
+}
+
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export default function FullGraph() {
   const container = useRef<HTMLDivElement>(null);
@@ -100,7 +202,12 @@ export default function FullGraph() {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hovered, setHovered] = useState<Node | null>(null);
-  const [showLabels, setShowLabels] = useState(false);
+  const [zoomedIn, setZoomedIn] = useState(false);
+  const [forceLabels, setForceLabels] = useState(false);
+  /** Pinned by clicking a legend row; survives until cleared. */
+  const [isolated, setIsolated] = useState<number | null>(null);
+  /** Transient, from hovering a legend row. */
+  const [preview, setPreview] = useState<number | null>(null);
 
   // The canvas resolves its palette at mount; the legend has to resolve the
   // same one at render, or its swatches disagree with the dots they explain.
@@ -121,59 +228,154 @@ export default function FullGraph() {
     return () => controller.abort();
   }, []);
 
-  const topicHues = useMemo(
-    () => buildTopicHues((data?.nodes ?? []).flatMap((n) => (n.topic ? [n.topic] : []))),
+  // ── Clusters ─────────────────────────────────────────────────────────────
+  //
+  // In the browser, not on the server: 211 concepts takes about eight
+  // milliseconds, and a server-side cache of something that cheap is a
+  // staleness bug with extra steps.
+  const clustering = useMemo(
+    () => (data ? cluster(data.nodes, data.edges) : null),
     [data],
   );
 
-  const legend = useMemo(() => {
-    if (!data) return [];
-    const counts = new Map<string, number>();
-    for (const n of data.nodes) {
-      if (n.topic) counts.set(n.topic, (counts.get(n.topic) ?? 0) + 1);
+  const clusters = useMemo(
+    () => (data && clustering ? describeClusters(data.nodes, clustering) : []),
+    [data, clustering],
+  );
+
+  const active = preview ?? isolated;
+  // Read inside build(), which is an effect: a theme switch rebuilds the
+  // whole instance and has to put the isolation back where it was.
+  const activeRef = useRef<number | null>(null);
+
+  /** Dim everything outside one cluster, or restore everything. */
+  const applyIsolation = useCallback((cy: cytoscape.Core, index: number | null) => {
+    cy.batch(() => {
+      cy.elements().removeClass("away");
+      if (index === null) return;
+      const inside = cy.nodes().filter((n) => n.data("cluster") === index);
+      cy.elements().difference(inside.union(inside.edgesWith(inside))).addClass("away");
+    });
+  }, []);
+
+  useEffect(() => {
+    activeRef.current = active;
+    const cy = cyRef.current;
+    if (cy) applyIsolation(cy, active);
+  }, [active, applyIsolation]);
+
+  // Pinning a cluster also goes there, and clearing comes back out. Only on
+  // a pin: a hover must never move the camera, or the legend becomes
+  // impossible to read down.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const duration = prefersReducedMotion() ? 0 : 260;
+    if (isolated === null) {
+      cy.animate({ fit: { eles: cy.elements(), padding: 60 } }, { duration });
+      return;
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
-  }, [data]);
+    const inside = cy.nodes().filter((n) => n.data("cluster") === isolated);
+    if (inside.nonempty()) {
+      cy.animate({ fit: { eles: inside, padding: 80 } }, { duration });
+    }
+  }, [isolated]);
+
+  // Escape clears a pinned isolation, which is the one interaction people try
+  // without being told.
+  useEffect(() => {
+    if (isolated === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsolated(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isolated]);
 
   // ── Render ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const el = container.current;
-    if (!el || !data || data.nodes.length === 0) return;
+    if (!el || !data || !clustering || data.nodes.length === 0) return;
+
+    // Fit explicitly rather than trusting the layout's own `fit`, which did
+    // not take at mount: the graph opened at zoom 1 on the origin, showing a
+    // tenth of a picture that had been laid out correctly. Guarded on a
+    // measurable container, because fitting to a zero-sized box is how you
+    // get a NaN zoom, and remembered so a later resize does not yank the
+    // view back from wherever the reader panned it.
+    let fitted = false;
+    const fitTo = (cy: cytoscape.Core) => {
+      if (el.clientWidth <= 0 || el.clientHeight <= 0) return false;
+      cy.fit(undefined, el.clientWidth < 640 ? 20 : 60);
+      return true;
+    };
 
     const build = () => {
       const colors = themeColors(el);
       const dark = colors.isDark;
+      // Cytoscape cannot resolve a CSS custom property: passing one makes it
+      // reject the whole declaration ("invalid style property") and fall back
+      // to its own default face, which is not the UI font. Resolve it here.
+      const sans =
+        getComputedStyle(el).getPropertyValue("--sans").trim() || "sans-serif";
       const big = data.nodes.length > 400;
+      const positions = seedPositions(data.nodes, clustering);
+      const clusterOf = clustering.of;
+      const anchors = new Set(clusters.map((c) => c.anchorId));
+
+      // Parallel relationships between the same pair: two concepts linked by
+      // both PREREQUISITE_OF and RELATED_TO get a slightly heavier line.
+      const pairWeight = new Map<string, number>();
+      const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+      for (const e of data.edges) {
+        const key = pairKey(e.from, e.to);
+        pairWeight.set(key, (pairWeight.get(key) ?? 0) + 1);
+      }
 
       const cy = cytoscape({
         container: el,
         elements: [
-          ...data.nodes.map((n) => ({
-            data: {
-              id: n.id,
-              label: n.name,
-              color: hueToColor(n.topic ? topicHues.get(n.topic) : undefined, dark) ?? colors.muted,
-              // Sized for a full-screen canvas: the old 8+sqrt*5 was tuned
-              // for a 720px box and left the dots looking incidental here.
-              size: Math.min(42, 11 + Math.sqrt(n.degree) * 6),
-              flagged: n.flagged,
-              tracked: n.tracked,
-            },
-            // Seeded, so the layout is reproducible. Spread over a square
-            // whose side grows with the node count, which keeps the starting
-            // density roughly constant as the graph grows.
-            position: (() => {
-              const span = Math.max(600, Math.sqrt(data.nodes.length) * 70);
-              const h = hash(n.id);
-              return {
-                x: ((h % 10000) / 10000) * span,
-                y: (((h >>> 16) % 10000) / 10000) * span,
-              };
-            })(),
-          })),
-          ...data.edges.map((e) => ({
-            data: { id: `${e.from}->${e.to}->${e.type}`, source: e.from, target: e.to },
-          })),
+          ...data.nodes.map((n) => {
+            const index = clusterOf.get(n.id) ?? 0;
+            return {
+              data: {
+                id: n.id,
+                label: n.name,
+                cluster: index,
+                color: clusterColor(index, dark, colors.muted),
+                // Sized for a full-screen canvas.
+                size: Math.min(42, 11 + Math.sqrt(n.degree) * 6),
+                flagged: n.flagged,
+                tracked: n.tracked,
+                anchor: anchors.has(n.id),
+              },
+              position: positions.get(n.id) ?? { x: 0, y: 0 },
+              classes: prefersReducedMotion() ? "" : "entering",
+            };
+          }),
+          ...data.edges.map((e) => {
+            const from = clusterOf.get(e.from);
+            const to = clusterOf.get(e.to);
+            const inter = from !== to;
+            return {
+              data: {
+                id: `${e.from}->${e.to}->${e.type}`,
+                source: e.from,
+                target: e.to,
+                inter,
+                directed: !UNDIRECTED.has(e.type),
+                // Inside a cluster the edge takes the cluster's colour, so a
+                // neighbourhood reads as one piece of fabric. Between
+                // clusters it stays the quiet line colour, so the bridges
+                // read as bridges.
+                color: inter
+                  ? colors.line
+                  : clusterColor(from ?? 0, dark, colors.muted),
+                opacity: inter ? 0.45 : dark ? 0.4 : 0.5,
+                width: Math.min(2.2, 1 + ((pairWeight.get(pairKey(e.from, e.to)) ?? 1) - 1) * 0.4),
+              },
+            };
+          }),
         ],
         style: [
           {
@@ -186,7 +388,7 @@ export default function FullGraph() {
               "border-color": colors.bg,
               label: "data(label)",
               "font-size": 11,
-              "font-family": "var(--font-sans), sans-serif",
+              "font-family": sans,
               color: colors.fg,
               "text-valign": "bottom",
               "text-margin-y": 4,
@@ -195,9 +397,23 @@ export default function FullGraph() {
               "text-background-color": colors.bg,
               "text-background-opacity": 0.8,
               "text-background-padding": "2px",
-              // Hidden by default on a large graph: hundreds of labels at
-              // once is an unreadable smear and costs a repaint each frame.
+              // Hidden by default: 211 labels at once is an unreadable smear
+              // and costs a repaint every frame.
               "text-opacity": 0,
+              "transition-property": "opacity",
+              "transition-duration": 260,
+            },
+          },
+          // The landmark of each cluster keeps its name at every zoom. A map
+          // with no place names is a texture.
+          {
+            selector: "node[?anchor]",
+            style: {
+              "text-opacity": 1,
+              "font-size": 12,
+              "font-weight": 600,
+              "text-background-opacity": 0.92,
+              "z-index": 15,
             },
           },
           { selector: "node[?tracked]", style: { "border-color": colors.accent, "border-width": 2 } },
@@ -205,30 +421,53 @@ export default function FullGraph() {
           {
             selector: "edge",
             style: {
-              width: 1,
-              "line-color": colors.line,
+              width: (edge: cytoscape.EdgeSingular) => Number(edge.data("width")),
+              "line-color": "data(color)",
               "curve-style": big ? "haystack" : "bezier",
-              opacity: 0.75,
+              opacity: (edge: cytoscape.EdgeSingular) => Number(edge.data("opacity")),
             },
           },
           { selector: ".labelled", style: { "text-opacity": 1, "z-index": 20 } },
           // Hovering dims everything that is not adjacent, which is the only
           // way to read one node's connections out of a dense graph.
-          { selector: ".dim", style: { opacity: 0.12, "text-opacity": 0 } },
+          { selector: ".dim", style: { opacity: 0.1, "text-opacity": 0 } },
+          // Isolating a cluster from the legend. Separate from .dim so a
+          // hover inside an isolated cluster still works normally.
+          { selector: ".away", style: { opacity: 0.08, "text-opacity": 0 } },
           {
             selector: ".highlight",
             style: {
               "line-color": colors.accent,
-              "target-arrow-color": colors.accent,
               width: 2,
               opacity: 1,
               "z-index": 10,
             },
           },
+          // Arrowheads only while highlighted. 519 of them permanently on
+          // screen is clutter; on the one node you are pointing at they
+          // answer "which way does this go".
+          {
+            selector: ".highlight[?directed]",
+            style: {
+              "target-arrow-shape": "triangle",
+              "target-arrow-color": colors.accent,
+              "arrow-scale": 0.7,
+            },
+          },
           {
             selector: ".focus",
-            style: { "border-color": colors.accent, "border-width": 3, "text-opacity": 1, "z-index": 30 },
+            style: {
+              "border-color": colors.accent,
+              "border-width": 3,
+              "text-opacity": 1,
+              "z-index": 30,
+              // The closest thing this renderer has to a drop shadow.
+              "underlay-color": colors.accent,
+              "underlay-opacity": 0.18,
+              "underlay-padding": 10,
+            },
           },
+          { selector: ".entering", style: { opacity: 0 } },
         ],
         layout: {
           name: "fcose",
@@ -236,27 +475,31 @@ export default function FullGraph() {
           randomize: false,
           animate: false,
           quality: big ? "default" : "proof",
-          // Tuned for a full-screen canvas. At the old boxed size these were
-          // 9000 / 90 / 120, which on a viewport-sized surface left a tight
-          // knot floating in the middle of a lot of nothing. More room
-          // deserves more spread: clusters separate instead of overlapping,
-          // and the shape of the graph becomes legible at a glance.
-          nodeRepulsion: 16000,
-          idealEdgeLength: 150,
-          nodeSeparation: 160,
+          // Springs that know whether they are inside a cluster or between
+          // two. This, more than the seeding, is what holds the
+          // neighbourhoods apart once the simulation settles: short and stiff
+          // within a community, long and slack across one.
+          idealEdgeLength: (edge: cytoscape.EdgeSingular) => (edge.data("inter") ? 320 : 55),
+          edgeElasticity: (edge: cytoscape.EdgeSingular) => (edge.data("inter") ? 0.05 : 0.45),
+          nodeRepulsion: 12000,
+          nodeSeparation: 140,
+          // Low, or every cluster is dragged back towards one blob in the
+          // middle and the separation above is wasted.
+          gravity: 0.15,
+          gravityRange: 4,
           // Two isolated concepts landed 20px apart and their labels merged
-          // into one unreadable word. Turning component packing off did not
-          // help: with no edges there is nothing pulling them apart, so they
-          // just stayed where they were seeded. These three options fix it
-          // properly. The first makes the layout reserve space for the label
-          // rather than the dot, which is what actually collides; the others
-          // tile disconnected nodes on a padded grid instead of heaping them.
+          // into one unreadable word. The first option makes the layout
+          // reserve space for the label rather than the dot, which is what
+          // actually collides; the others tile disconnected nodes on a padded
+          // grid instead of heaping them.
           nodeDimensionsIncludeLabels: true,
           tile: true,
           tilingPaddingVertical: 30,
           tilingPaddingHorizontal: 30,
           padding: 40,
-        } as cytoscape.LayoutOptions,
+          // fcose accepts a function for the two spring options above, which
+          // its type definitions declare as numbers.
+        } as unknown as cytoscape.LayoutOptions,
         minZoom: 0.05,
         maxZoom: 3,
         // Performance switches. Without these a thousand nodes is unusable
@@ -270,12 +513,24 @@ export default function FullGraph() {
 
       cyRef.current = cy;
 
-      // Labels appear once you are zoomed in far enough to read them.
+      // Fit explicitly rather than trusting the layout's own `fit`, which did
+      // not take at mount: the graph opened at zoom 1 centred on the origin,
+      // showing a tenth of a picture that was laid out correctly. Guarded on
+      // a measurable container, because fitting to a zero-sized box is how
+      // you get a NaN zoom.
+      fitted = fitTo(cy);
+
+      // Labels appear once you are zoomed in far enough to read them. The
+      // nine landmarks are always on, and are scaled against the zoom so
+      // they stay the same size on screen however far out you are: at the
+      // zoom that fits 211 nodes, 12 model pixels is five real ones.
       const syncLabels = () => {
-        const on = cy.zoom() > 0.75;
-        setShowLabels(on);
-        if (on) cy.nodes().addClass("labelled");
-        else cy.nodes().removeClass("labelled");
+        const zoom = cy.zoom();
+        setZoomedIn(zoom > 0.75);
+        cy.nodes("[?anchor]").style({
+          "font-size": Math.max(11, Math.min(32, 12 / zoom)),
+          "text-max-width": `${Math.round(Math.max(90, 110 / zoom))}px`,
+        });
       };
       cy.on("zoom", syncLabels);
       syncLabels();
@@ -297,6 +552,19 @@ export default function FullGraph() {
       });
 
       cy.on("tap", "node", (event) => router.push(`/c/${event.target.id()}`));
+      // Tapping the backdrop is the other thing people try to get out of an
+      // isolated cluster.
+      cy.on("tap", (event) => {
+        if (event.target === cy) setIsolated(null);
+      });
+
+      // Fade the nodes in once they have somewhere to be. The layout is
+      // synchronous, so this runs after it has finished.
+      if (!prefersReducedMotion()) {
+        requestAnimationFrame(() => cy.nodes().removeClass("entering"));
+      }
+
+      applyIsolation(cy, activeRef.current);
 
       return cy;
     };
@@ -316,7 +584,29 @@ export default function FullGraph() {
       cy.pan(pan);
     });
 
-    const observer = new ResizeObserver(() => cy.resize());
+    // The first measurable size also fits, in case the container had none
+    // when the layout ran. After that a resize keeps whatever you were
+    // looking at in the middle, instead of refitting: the view is wherever
+    // you panned it, and yanking it back is rude. Cytoscape's own resize
+    // keeps the top-left corner fixed rather than the centre, which on a
+    // phone rotating to landscape leaves the graph mostly off screen.
+    const observer = new ResizeObserver(() => {
+      const zoom = cy.zoom();
+      const pan = cy.pan();
+      const centre = {
+        x: (cy.width() / 2 - pan.x) / zoom,
+        y: (cy.height() / 2 - pan.y) / zoom,
+      };
+      cy.resize();
+      if (!fitted) {
+        fitted = fitTo(cy);
+        return;
+      }
+      cy.pan({
+        x: cy.width() / 2 - centre.x * zoom,
+        y: cy.height() / 2 - centre.y * zoom,
+      });
+    });
     observer.observe(el);
 
     return () => {
@@ -325,7 +615,15 @@ export default function FullGraph() {
       cy.destroy();
       cyRef.current = null;
     };
-  }, [data, router, topicHues]);
+  }, [data, clustering, clusters, router, applyIsolation]);
+
+  // Labels: on past a zoom threshold, or forced from the control.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    if (zoomedIn || forceLabels) cy.nodes().addClass("labelled");
+    else cy.nodes().removeClass("labelled");
+  }, [zoomedIn, forceLabels, data, clustering]);
 
   if (error) {
     return <div className={styles.state}>{error}</div>;
@@ -347,6 +645,10 @@ export default function FullGraph() {
     );
   }
 
+  const shown = clusters.slice(0, PALETTE);
+  const rest = clusters.slice(PALETTE);
+  const labelsOn = zoomedIn || forceLabels;
+
   // Every piece of chrome is overlaid on the canvas rather than stacked
   // around it, so none of it takes height away from the thing you came to
   // look at.
@@ -354,25 +656,52 @@ export default function FullGraph() {
     <div className={styles.frame}>
       <div ref={container} className={styles.canvas} />
 
-      {legend.length > 0 && (
-        <ul className={styles.legend}>
-          {legend.map(([topic, count]) => (
-            <li key={topic} className={styles.legendItem}>
-              <span
-                className={styles.swatch}
-                style={{
-                  background: hueToColor(topicHues.get(topic), isDark) ?? undefined,
-                }}
-                aria-hidden="true"
-              />
-              <span className={styles.legendName}>{topic}</span>
-              <span className={styles.legendCount}>{count}</span>
-            </li>
-          ))}
-        </ul>
+      {shown.length > 0 && (
+        <div className={styles.legend}>
+          <ul className={styles.legendList}>
+            {shown.map((c) => (
+              <li key={c.index}>
+                <button
+                  type="button"
+                  className={`${styles.legendItem} ${isolated === c.index ? styles.legendOn : ""}`}
+                  aria-pressed={isolated === c.index}
+                  onClick={() => setIsolated(isolated === c.index ? null : c.index)}
+                  onMouseEnter={() => setPreview(c.index)}
+                  onMouseLeave={() => setPreview((p) => (p === c.index ? null : p))}
+                  onFocus={() => setPreview(c.index)}
+                  onBlur={() => setPreview((p) => (p === c.index ? null : p))}
+                >
+                  <span
+                    className={styles.swatch}
+                    style={{ background: clusterColor(c.index, isDark, "var(--muted)") }}
+                    aria-hidden="true"
+                  />
+                  <span className={styles.legendText}>
+                    <span className={styles.legendName}>{c.topic ?? c.name}</span>
+                    <span className={styles.legendSub}>{c.name}</span>
+                  </span>
+                  <span className={styles.legendCount}>{c.size}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {rest.length > 0 && (
+            <p className={styles.legendRest}>
+              +{rest.length} smaller {rest.length === 1 ? "cluster" : "clusters"}
+            </p>
+          )}
+        </div>
       )}
 
       <div className={styles.controls}>
+        <button
+          type="button"
+          className={styles.control}
+          aria-pressed={forceLabels}
+          onClick={() => setForceLabels((on) => !on)}
+        >
+          Names
+        </button>
         <button
           type="button"
           className={styles.control}
@@ -387,16 +716,22 @@ export default function FullGraph() {
           <>
             <strong className={styles.hudName}>{hovered.name}</strong>
             <span className={styles.hudMeta}>
-              {hovered.topic ?? "no topic"} · {hovered.degree}{" "}
+              {hovered.topics.slice(0, 3).join(" · ") || "no topic"} · {hovered.degree}{" "}
               {hovered.degree === 1 ? "link" : "links"} · click to open
             </span>
           </>
         ) : (
           <>
             <span className={styles.hudMeta}>
-              {data.nodes.length} concepts · {data.edges.length} links
-              {!showLabels && " · zoom in for names"}
+              {data.nodes.length} concepts · {data.edges.length} links ·{" "}
+              {clusters.length} {clusters.length === 1 ? "cluster" : "clusters"}
+              {!labelsOn && " · zoom in for names"}
             </span>
+            {isolated !== null && clusters[isolated] && (
+              <span className={styles.hudMeta}>
+                showing {clusters[isolated].topic ?? clusters[isolated].name} · escape to clear
+              </span>
+            )}
             {data.truncated && (
               <span className={styles.hudMeta}>
                 the {data.nodes.length} most connected of {data.total}

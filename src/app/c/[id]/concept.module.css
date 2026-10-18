@@ -188,3 +188,34 @@
   color: var(--muted);
   margin: 0 0 var(--s3);
 }
+
+/*
+ * The way into the reading view. It sits under the neighbourhood header
+ * rather than beside the hop numbers, because it is an action and those are
+ * a setting, and it carries whichever depth is currently selected.
+ */
+.read {
+  display: block;
+  margin-bottom: var(--s3);
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--muted);
+  font-size: var(--step--1);
+  text-align: center;
+  text-decoration: none;
+  transition:
+    color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.read:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.read:active {
+  transform: scale(0.99);
+}
