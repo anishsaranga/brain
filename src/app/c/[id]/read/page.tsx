@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { neighbourhoodNotes, type ReadingItem } from "@/lib/graph";
+import { neighbourhoodNotes, READING_CAP, type ReadingItem } from "@/lib/graph";
 import { UNDIRECTED, relLabel } from "@/lib/rel-types";
 import { plainText } from "@/lib/markdown";
 import Markdown from "@/components/markdown";
@@ -10,8 +10,6 @@ import styles from "./read.module.css";
 
 export const dynamic = "force-dynamic";
 
-/** Enough notes to learn a subject from, few enough to actually finish. */
-const CAP = 40;
 const WORDS_PER_MINUTE = 220;
 
 export async function generateMetadata({
@@ -49,7 +47,7 @@ export default async function ReadPage({
   const { depth: rawDepth } = await searchParams;
   const depth = Math.max(1, Math.min(3, Number(rawDepth) || 1));
 
-  const walk = await neighbourhoodNotes(id, depth, CAP);
+  const walk = await neighbourhoodNotes(id, depth, READING_CAP);
   if (!walk) notFound();
 
   const { center, items, truncated } = walk;

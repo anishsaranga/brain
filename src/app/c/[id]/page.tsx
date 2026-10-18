@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getConcept, getNeighbourhood, unlinkedNeighbours, getRevisions } from "@/lib/graph";
+import {
+  getConcept,
+  getNeighbourhood,
+  unlinkedNeighbours,
+  getRevisions,
+  READING_CAP,
+} from "@/lib/graph";
 import GraphCanvas from "@/components/graph-canvas";
 import ConceptEditor from "@/components/concept-editor";
 import Markdown from "@/components/markdown";
@@ -54,6 +60,11 @@ export default async function ConceptPage({
     flagged: c.flagged,
   }));
   const edges = (hood?.edges ?? []).map((e) => ({ from: e.from, to: e.to, type: e.type }));
+
+  // What the reading view will actually show, so the button can say it. The
+  // neighbourhood is already capped at 100 nodes, so a count above the
+  // reading cap is the only case where the two numbers can disagree.
+  const around = hood?.nodes.length ?? 0;
 
   // Nearest concepts that are not already linked: the antidote to a graph of
   // disconnected per-conversation islands.
@@ -132,9 +143,16 @@ export default async function ConceptPage({
             </span>
           </div>
 
-          {nodes.length > 1 && (
+          {around > 0 && (
             <Link href={`/c/${concept.id}/read?depth=${depth}`} className={styles.read}>
-              Read all {depth === 1 ? "of it" : `${depth} hops`} →
+              <span>
+                {around > READING_CAP
+                  ? `Read the ${READING_CAP} nearest notes`
+                  : `Read all ${around} ${around === 1 ? "note" : "notes"}`}
+              </span>
+              <span className={styles.readArrow} aria-hidden="true">
+                →
+              </span>
             </Link>
           )}
 

@@ -455,6 +455,15 @@ export interface NeighbourhoodNotes {
 }
 
 /**
+ * Enough notes to learn a subject from, few enough to actually finish.
+ *
+ * Lives here rather than in the page because the concept page has to promise
+ * the same number on the way in ("read all 14 notes") that the reading page
+ * delivers. Two copies of 40 is a lie waiting to happen.
+ */
+export const READING_CAP = 40;
+
+/**
  * The notes around a note, in reading order.
  *
  * `getNeighbourhood` answers what the picture should look like; this answers
@@ -473,7 +482,7 @@ export interface NeighbourhoodNotes {
 export async function neighbourhoodNotes(
   id: string,
   depth = 1,
-  limit = 40,
+  limit = READING_CAP,
 ): Promise<NeighbourhoodNotes | null> {
   const center = await getConcept(id);
   if (!center) return null;
