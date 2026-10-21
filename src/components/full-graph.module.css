@@ -153,8 +153,40 @@
   gap: var(--s3);
 }
 
+.legendActions {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.legendInput {
+  min-width: 0;
+  padding: 0.18rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: var(--step--1);
+}
+
+.legendInput::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.legendError {
+  margin: 0.35rem 0.35rem 0.1rem;
+  font-size: 0.68rem;
+  color: var(--danger);
+}
+
 .legendRead {
   flex: none;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
   padding: 0.26rem 0.5rem;
   border-radius: 6px;
   color: var(--muted);
@@ -239,11 +271,21 @@
   opacity: 0.75;
 }
 
-.legendRest {
-  margin: 0.35rem 0 0.1rem;
-  padding: 0 0.35rem;
-  font-size: 0.68rem;
+/*
+ * Where the colours run out.
+ *
+ * Past the palette every cluster is the same grey, on the canvas and here.
+ * Saying so is better than fourteen more hues nobody can tell apart, or a
+ * swatch that quietly stops meaning anything.
+ */
+.legendBreak {
+  margin: 0.4rem 0.35rem 0.25rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.64rem;
+  letter-spacing: 0.03em;
   color: var(--muted);
+  opacity: 0.8;
 }
 
 /* ── Controls ─────────────────────────────────────────────────────────────── */
@@ -318,15 +360,19 @@
     grid-template-columns: auto max-content auto;
   }
 
-  /* A read link on every chip would double the width of a strip that is
-     already the width of the phone. It appears on the one you have tapped. */
-  .legendRead {
+  /* Controls on every chip would double the width of a strip that is already
+     the width of the phone. They appear on the one you have tapped. */
+  .legendActions {
     display: none;
-    text-align: center;
   }
 
-  .legendRowOn .legendRead {
-    display: block;
+  .legendRowOn .legendActions {
+    display: flex;
+    justify-content: center;
+  }
+
+  .legendBreak {
+    display: none;
   }
 
   .legendName {

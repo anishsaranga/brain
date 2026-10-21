@@ -881,6 +881,85 @@ await check("an unknown id is null rather than a crash", async () => {
   assert.equal(await G.clusterNotes("00000000-0000-0000-0000-000000000000"), null);
 });
 
+// ── Naming a cluster ─────────────────────────────────────────────────────────
+
+section("renameCluster");
+
+await check("the name lands on the cluster's busiest member, not the one passed", async () => {
+  const { a } = await twoCliques();
+
+  // A1 carries the bridge, so it is the highest-degree member of its clique.
+  const result = await G.renameCluster(a[2], "Left side");
+  assert.equal(result.named, a[0], "the caller passes any member; the server picks the anchor");
+
+  assert.equal((await G.getConcept(a[0])).clusterName, "Left side");
+  assert.equal((await G.getConcept(a[2])).clusterName, null);
+});
+
+await check("the other cluster is untouched", async () => {
+  const { a, b } = await twoCliques();
+  await G.renameCluster(a[0], "Left side");
+  for (const id of b) {
+    assert.equal((await G.getConcept(id)).clusterName, null);
+  }
+});
+
+await check("only one note in a cluster may hold the name", async () => {
+  const { a } = await twoCliques();
+
+  // Plant a name on a quiet member behind the entry point's back.
+  await G.setClusterName(a[3], "Stale");
+  const result = await G.renameCluster(a[1], "Current");
+
+  assert.equal(result.cleared, 1, "the stale carrier must be cleared, not left to argue");
+  assert.equal((await G.getConcept(a[3])).clusterName, null);
+  assert.equal((await G.getConcept(a[0])).clusterName, "Current");
+});
+
+await check("an empty name hands the cluster back to the automatic label", async () => {
+  const { a } = await twoCliques();
+  await G.renameCluster(a[0], "Left side");
+  await G.renameCluster(a[0], null);
+  for (const id of a) {
+    assert.equal((await G.getConcept(id)).clusterName, null);
+  }
+});
+
+await check("naming writes no revision and does not disturb the embedding", async () => {
+  const { a } = await twoCliques();
+  const hashOf = async (id) => {
+    const r = await read("MATCH (c:Concept {id: $id}) RETURN c.textHash AS h", { id });
+    return r.records[0].get("h");
+  };
+  const beforeHash = await hashOf(a[0]);
+  const beforeRevs = await G.getRevisions(a[0]);
+
+  await G.renameCluster(a[0], "Left side");
+
+  assert.equal(await hashOf(a[0]), beforeHash, "the name is not part of the embedded text");
+  assert.deepEqual(await G.getRevisions(a[0]), beforeRevs, "naming a cluster is not editing a note");
+});
+
+await check("a tombstone cannot name anything", async () => {
+  const { a } = await twoCliques();
+  await G.softDeleteConcept(a[3]);
+  assert.equal(await G.renameCluster(a[3], "Nope"), null);
+  assert.equal(await G.setClusterName(a[3], "Nope"), false);
+});
+
+await check("an unknown id is null rather than a crash", async () => {
+  await twoCliques();
+  assert.equal(await G.renameCluster("00000000-0000-0000-0000-000000000000", "Nope"), null);
+});
+
+await check("the cluster read reports the name it was given", async () => {
+  const { a } = await twoCliques();
+  await G.renameCluster(a[0], "Left side");
+  const got = await G.clusterNotes(a[1]);
+  assert.equal(got.label.custom, "Left side");
+  assert.equal(got.label.text, "Left side");
+});
+
 // ── Teardown ─────────────────────────────────────────────────────────────────
 
 await getDriver().close();

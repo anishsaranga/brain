@@ -87,7 +87,7 @@ export default async function ReadPage({
       <header className={styles.head}>
         <p className={styles.eyebrow}>
           {asCluster
-            ? `reading the ${group.label.topic ?? "whole"} cluster`
+            ? `reading the ${group.label.text} cluster`
             : "reading the neighbourhood"}
         </p>
         <h1 className={styles.title}>{center.name}</h1>

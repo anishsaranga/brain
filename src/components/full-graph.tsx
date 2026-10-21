@@ -1,14 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  Fragment,
+  useCallback,
+  useTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { renameCluster } from "@/app/actions";
 import cytoscape from "cytoscape";
 import fcose from "cytoscape-fcose";
 import {
   cluster,
+  clusterColor,
   describeClusters,
+  PALETTE,
   type Clustering,
+  type ClusterInfo,
 } from "@/lib/clusters";
 import { UNDIRECTED, type RelType } from "@/lib/rel-types";
 import { themeColors, watchTheme, isDarkTheme } from "@/lib/theme-colors";
@@ -55,37 +68,6 @@ function hash(value: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
-}
-
-/**
- * A hue per cluster.
- *
- * Colour used to come from the node's alphabetically-first topic, which on
- * this graph meant colouring by alphabet: almost every concept carries two to
- * four topics, there are 95 of them, and the one broad enough to group things
- * covered 128 of 211 concepts. Clusters are the honest grouping and there are
- * usually under a dozen, which is a number of colours a person can actually
- * hold apart.
- *
- * ACCENT_HUE is skipped because the accent is also the "tracked" ring. A
- * cluster drawn in the same green made tracked and untracked nodes of that
- * cluster impossible to tell apart.
- *
- * COMMAS ARE REQUIRED. Cytoscape's colour parser predates the space-separated
- * `hsl(H S% L%)` syntax and silently falls back to grey on it, with no warning
- * and no error: every node rendered the same grey while the legend, which is
- * ordinary CSS and does understand the modern form, showed the right colours.
- */
-const ACCENT_HUE = 152;
-const ACCENT_GUARD = 20;
-/** Clusters past this are drawn in muted grey rather than an 11th near-hue. */
-const PALETTE = 10;
-
-function clusterColor(index: number, dark: boolean, muted: string): string {
-  if (index >= PALETTE) return muted;
-  const usable = 360 - ACCENT_GUARD * 2;
-  const hue = Math.round(((index * usable) / PALETTE + ACCENT_HUE + ACCENT_GUARD) % 360);
-  return dark ? `hsl(${hue}, 55%, 64%)` : `hsl(${hue}, 58%, 36%)`;
 }
 
 /**
@@ -145,6 +127,11 @@ export default function FullGraph() {
   const [isolated, setIsolated] = useState<number | null>(null);
   /** Transient, from hovering a legend row. */
   const [preview, setPreview] = useState<number | null>(null);
+  /** The cluster whose name is being edited, and the text so far. */
+  const [renaming, setRenaming] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [, startRename] = useTransition();
 
   // The canvas resolves its palette at mount; the legend has to resolve the
   // same one at render, or its swatches disagree with the dots they explain.
@@ -173,6 +160,41 @@ export default function FullGraph() {
   const clustering = useMemo(
     () => (data ? cluster(data.nodes, data.edges) : null),
     [data],
+  );
+
+  /**
+   * Rename a cluster, locally and then on the server.
+   *
+   * The local half mirrors exactly what `renameCluster` does in graph.ts —
+   * the name onto the anchor, cleared off every other member — because both
+   * sides ran the same clustering and so already agree on who the anchor is.
+   * Re-fetching the whole graph to learn one string back would be slower and
+   * no more correct.
+   */
+  const applyRename = useCallback(
+    (c: ClusterInfo, value: string) => {
+      const trimmed = value.trim().slice(0, 60);
+      const members = new Set(clustering?.clusters[c.index] ?? []);
+      setRenaming(null);
+      setRenameError(null);
+      setData((d) =>
+        d
+          ? {
+              ...d,
+              nodes: d.nodes.map((n) =>
+                members.has(n.id)
+                  ? { ...n, clusterName: n.id === c.anchorId ? trimmed || null : null }
+                  : n,
+              ),
+            }
+          : d,
+      );
+      startRename(async () => {
+        const result = await renameCluster(c.anchorId, trimmed);
+        if (!result.ok) setRenameError(result.error);
+      });
+    },
+    [clustering],
   );
 
   const clusters = useMemo(
@@ -582,8 +604,6 @@ export default function FullGraph() {
     );
   }
 
-  const shown = clusters.slice(0, PALETTE);
-  const rest = clusters.slice(PALETTE);
   const labelsOn = zoomedIn || forceLabels;
 
   // Every piece of chrome is overlaid on the canvas rather than stacked
@@ -593,12 +613,43 @@ export default function FullGraph() {
     <div className={styles.frame}>
       <div ref={container} className={styles.canvas} />
 
-      {shown.length > 0 && (
+      {clusters.length > 0 && (
         <div className={styles.legend}>
           <ul className={styles.legendList}>
-            {shown.map((c) => (
+            {clusters.map((c) => (
+              <Fragment key={c.index}>
+                {c.index === PALETTE && (
+                  <li className={styles.legendBreak} aria-hidden="true">
+                    drawn in grey from here
+                  </li>
+                )}
+              {renaming === c.index ? (
+                <li className={`${styles.legendRow} ${styles.legendRowOn}`}>
+                  <input
+                    autoFocus
+                    value={draft}
+                    maxLength={60}
+                    placeholder={c.topic ?? c.name}
+                    aria-label="Name for this cluster"
+                    className={styles.legendInput}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") applyRename(c, draft);
+                      if (e.key === "Escape") setRenaming(null);
+                    }}
+                  />
+                  <span className={styles.legendActions}>
+                    <button
+                      type="button"
+                      className={styles.legendRead}
+                      onClick={() => applyRename(c, draft)}
+                    >
+                      {draft.trim() === "" ? "clear" : "save"}
+                    </button>
+                  </span>
+                </li>
+              ) : (
               <li
-                key={c.index}
                 className={`${styles.legendRow} ${
                   isolated === c.index ? styles.legendRowOn : ""
                 }`}
@@ -619,28 +670,48 @@ export default function FullGraph() {
                     aria-hidden="true"
                   />
                   <span className={styles.legendText}>
-                    <span className={styles.legendName}>{c.topic ?? c.name}</span>
+                    <span className={styles.legendName}>{c.label}</span>
                     <span className={styles.legendSub}>{c.name}</span>
                   </span>
                   <span className={styles.legendCount}>{c.size}</span>
                 </button>
-                <Link
-                  href={`/c/${c.anchorId}/read?mode=cluster`}
-                  className={styles.legendRead}
-                  title={`Read all ${c.size} notes in this cluster`}
-                  onMouseEnter={() => setPreview(c.index)}
-                  onMouseLeave={() => setPreview((p) => (p === c.index ? null : p))}
-                  onFocus={() => setPreview(c.index)}
-                  onBlur={() => setPreview((p) => (p === c.index ? null : p))}
-                >
-                  read
-                </Link>
+                <span className={styles.legendActions}>
+                  <Link
+                    href={`/c/${c.anchorId}/read?mode=cluster`}
+                    className={styles.legendRead}
+                    title={`Read all ${c.size} notes in this cluster`}
+                    onMouseEnter={() => setPreview(c.index)}
+                    onMouseLeave={() => setPreview((p) => (p === c.index ? null : p))}
+                    onFocus={() => setPreview(c.index)}
+                    onBlur={() => setPreview((p) => (p === c.index ? null : p))}
+                  >
+                    read
+                  </Link>
+                  {/* Only on the cluster you have already singled out. Three
+                      controls on every resting row is the crowding this
+                      legend was just rescued from. */}
+                  {isolated === c.index && (
+                    <button
+                      type="button"
+                      className={styles.legendRead}
+                      title="Give this cluster a name of your own"
+                      onClick={() => {
+                        setDraft(c.custom ?? "");
+                        setRenaming(c.index);
+                      }}
+                    >
+                      rename
+                    </button>
+                  )}
+                </span>
               </li>
+              )}
+              </Fragment>
             ))}
           </ul>
-          {rest.length > 0 && (
-            <p className={styles.legendRest}>
-              +{rest.length} smaller {rest.length === 1 ? "cluster" : "clusters"}
+          {renameError && (
+            <p role="status" className={styles.legendError}>
+              {renameError}
             </p>
           )}
         </div>

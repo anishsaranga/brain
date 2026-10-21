@@ -102,7 +102,8 @@ async function buildFixture() {
         c.due        = datetime('2026-11-01T09:30:00Z'),
         c.lastReview = datetime('2026-10-14T09:30:00Z'),
         c.flagged    = true,
-        c.flagNote   = 'check the election timeout numbers'
+        c.flagNote   = 'check the election timeout numbers',
+        c.clusterName = 'Consensus'
     `,
     { id: raft.id },
   );
@@ -258,6 +259,9 @@ await check("preserves aliases, topics, prompt and flags", async () => {
   assert.equal(raft.prompt, "How does Raft elect a leader?");
   assert.equal(raft.flagged, true);
   assert.equal(raft.flagNote, "check the election timeout numbers");
+  // The name a cluster was given lives on one note and nowhere else, so a
+  // backup that dropped it would lose it for good.
+  assert.equal(raft.clusterName, "Consensus");
   const c = await G.getConcept(raftId);
   assert.ok(c.topics.includes("Distributed systems"));
 });

@@ -18,7 +18,9 @@
  */
 import assert from "node:assert/strict";
 
-const { cluster, clusterAt, describeClusters } = await import("@/lib/clusters");
+const { cluster, clusterAt, describeClusters, clusterColor, PALETTE } = await import(
+  "@/lib/clusters"
+);
 
 let passed = 0;
 let failed = 0;
@@ -298,6 +300,92 @@ check("every cluster gets a description, in the same order", () => {
     assert.equal(c.size, clustering.clusters[i].length);
     assert.ok(clustering.clusters[i].includes(c.anchorId));
   });
+});
+
+section("a typed name");
+
+check("a name on a member beats the lift topic", () => {
+  const { nodes, edges } = tagged();
+  nodes.find((n) => n.id === "a2").clusterName = "Sign-in";
+  const info = describeClusters(nodes, cluster(nodes, edges));
+  const auth = info.find((c) => c.anchorId === "a1");
+  assert.equal(auth.custom, "Sign-in");
+  assert.equal(auth.label, "Sign-in");
+  assert.equal(auth.topic, "auth", "the derived parts stay, they are just not what is shown");
+});
+
+check("the busiest carrier wins when two notes carry a name", () => {
+  const { nodes, edges } = tagged();
+  nodes.find((n) => n.id === "a1").clusterName = "Busy";
+  nodes.find((n) => n.id === "a2").clusterName = "Quiet";
+  const info = describeClusters(nodes, cluster(nodes, edges));
+  assert.equal(info.find((c) => c.anchorId === "a1").label, "Busy");
+});
+
+check("a tie between carriers resolves by name, not by row order", () => {
+  const base = () => [
+    { id: "x1", name: "Alpha", topics: [], degree: 2, clusterName: "From Alpha" },
+    { id: "x2", name: "Beta", topics: [], degree: 2, clusterName: "From Beta" },
+    { id: "x3", name: "Gamma", topics: [], degree: 2 },
+  ];
+  const edges = [
+    { from: "x1", to: "x2" },
+    { from: "x2", to: "x3" },
+    { from: "x3", to: "x1" },
+  ];
+  const forwards = describeClusters(base(), cluster(base(), edges))[0].label;
+  const backwards = describeClusters(base().reverse(), cluster(base(), edges))[0].label;
+  assert.equal(forwards, "From Alpha");
+  assert.equal(backwards, forwards, "the same graph must describe itself the same way");
+});
+
+check("with no typed name the label is what it always was", () => {
+  const { nodes, edges } = tagged();
+  const info = describeClusters(nodes, cluster(nodes, edges));
+  for (const c of info) {
+    assert.equal(c.custom, null);
+    assert.equal(c.label, c.topic ?? c.name);
+  }
+});
+
+section("the palette");
+
+check("every cluster below the cap gets its own colour", () => {
+  const seen = new Set();
+  for (let i = 0; i < PALETTE; i++) seen.add(clusterColor(i, true, "grey"));
+  assert.equal(seen.size, PALETTE, "fourteen clusters, fourteen distinct colours");
+});
+
+check("past the cap they share the muted grey", () => {
+  assert.equal(clusterColor(PALETTE, true, "grey"), "grey");
+  assert.equal(clusterColor(PALETTE + 9, false, "grey"), "grey");
+});
+
+check("neighbouring clusters are far apart in hue", () => {
+  const hueOf = (i) => Number(clusterColor(i, true, "grey").match(/hsl\((\d+)/)[1]);
+  for (let i = 0; i + 1 < PALETTE; i++) {
+    const a = hueOf(i);
+    const b = hueOf(i + 1);
+    const apart = Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+    assert.ok(
+      apart > 90,
+      `clusters ${i} and ${i + 1} sit on adjacent legend rows but are ${apart}° apart`,
+    );
+  }
+});
+
+check("nothing claims the accent, which is the tracked ring", () => {
+  const hueOf = (i) => Number(clusterColor(i, true, "grey").match(/hsl\((\d+)/)[1]);
+  for (let i = 0; i < PALETTE; i++) {
+    const d = Math.min(Math.abs(hueOf(i) - 152), 360 - Math.abs(hueOf(i) - 152));
+    assert.ok(d >= 20, `cluster ${i} is ${d}° from the accent green`);
+  }
+});
+
+check("colours are comma-separated, which Cytoscape's parser requires", () => {
+  for (let i = 0; i < PALETTE; i++) {
+    assert.match(clusterColor(i, i % 2 === 0, "grey"), /^hsl\(\d+, \d+%, \d+%\)$/);
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

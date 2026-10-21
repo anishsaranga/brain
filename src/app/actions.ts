@@ -12,6 +12,7 @@ import {
   hardDeleteConcept,
   setConceptFlags,
   setTracked,
+  renameCluster as renameClusterInGraph,
   isRelType,
   type RelType,
 } from "@/lib/graph";
@@ -249,6 +250,35 @@ export async function trackConcept(
     message: result.tracked
       ? "In review. It will come up in a session."
       : "Out of review. The note itself is untouched.",
+  };
+}
+
+/**
+ * Name the link community a note belongs to, or clear the name.
+ *
+ * The caller passes any member and a string; which note the name lands on is
+ * decided in `graph.ts`, which recomputes the grouping and picks its busiest
+ * member. A blank name clears it and the automatic label comes back.
+ */
+export async function renameCluster(
+  memberId: string,
+  name: string,
+): Promise<ActionResult> {
+  await requireUser();
+
+  const trimmed = name.trim();
+  if (trimmed.length > 60) return fail("That name is too long for a legend row.");
+
+  const result = await renameClusterInGraph(memberId, trimmed === "" ? null : trimmed);
+  if (!result) {
+    return fail("That note is not in any cluster, or it is in the trash.");
+  }
+
+  revalidatePath("/graph");
+  revalidatePath(`/c/${memberId}`);
+  return {
+    ok: true,
+    message: trimmed === "" ? "Back to the automatic name." : `Called "${trimmed}".`,
   };
 }
 

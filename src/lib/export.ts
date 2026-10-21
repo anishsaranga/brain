@@ -268,6 +268,11 @@ export function toMarkdownFiles(
       `name: ${JSON.stringify(name)}`,
       `aliases: ${JSON.stringify(c.aliases ?? [])}`,
       `tracked: ${Boolean(c.tracked)}`,
+      // Only the one note in a cluster that carries the name has this, so it
+      // is written only when present rather than as an empty field on 490
+      // files. The JSON backup keeps it either way; this list is the vault's
+      // view, and it is the one place a new property is dropped silently.
+      c.clusterName ? `cluster: ${JSON.stringify(c.clusterName)}` : null,
       c.due ? `due: ${c.due}` : null,
       `created: ${c.createdAt ?? ""}`,
       "---",

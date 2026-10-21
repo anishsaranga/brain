@@ -24,6 +24,14 @@ export interface Concept {
   tracked: boolean;
   flagged: boolean;
   flagNote: string | null;
+  /**
+   * A name this note gives to the whole link community it sits in, or null.
+   *
+   * On a note rather than on a cluster because a cluster has nowhere to keep
+   * it: membership is recomputed from the links every load. See
+   * `renameCluster`.
+   */
+  clusterName: string | null;
   createdAt: string;
   updatedAt: string;
   topics: string[];
@@ -72,6 +80,7 @@ function toConcept(props: ConceptProps, topics: string[] = []): Concept {
     tracked: Boolean(props.tracked),
     flagged: Boolean(props.flagged),
     flagNote: str(props.flagNote),
+    clusterName: str(props.clusterName),
     createdAt: str(props.createdAt) ?? "",
     updatedAt: str(props.updatedAt) ?? "",
     topics,
@@ -1293,6 +1302,8 @@ export interface FullGraphNode {
   degree: number;
   tracked: boolean;
   flagged: boolean;
+  /** Set on at most one member of a cluster; see `renameCluster`. */
+  clusterName: string | null;
 }
 
 export interface GraphLink {
@@ -1338,6 +1349,7 @@ export async function fullGraph(limit = 1500): Promise<FullGraph> {
     RETURN c.id AS id, c.name AS name, degree,
            coalesce(c.tracked, false) AS tracked,
            coalesce(c.flagged, false) AS flagged,
+           c.clusterName AS clusterName,
            collect(t.name) AS topics
     `,
     { limit: int(capped) },
@@ -1356,6 +1368,7 @@ export async function fullGraph(limit = 1500): Promise<FullGraph> {
     degree: num(r.get("degree")),
     tracked: Boolean(r.get("tracked")),
     flagged: Boolean(r.get("flagged")),
+    clusterName: str(r.get("clusterName")),
   }));
 
   // Edges only among the nodes that survived the cap. An edge pointing at a
@@ -1679,7 +1692,8 @@ export interface ClusterNotes extends NeighbourhoodNotes {
   /** Members of the whole cluster, the centre included, before any cap. */
   size: number;
   /** How the legend names this cluster: its landmark, and its stand-out topic. */
-  label: { name: string; topic: string | null };
+  /** What to call it on screen, and the parts it was built from. */
+  label: { text: string; name: string; topic: string | null; custom: string | null };
 }
 
 /**
@@ -1797,6 +1811,90 @@ export async function clusterNotes(
     items,
     truncated: order.length > kept.length,
     size: members.size,
-    label: { name: info?.name ?? center.name, topic: info?.topic ?? null },
+    label: {
+      text: info?.label ?? center.name,
+      name: info?.name ?? center.name,
+      topic: info?.topic ?? null,
+      custom: info?.custom ?? null,
+    },
   };
+}
+
+/**
+ * Write (or clear) the name a single note gives to its community.
+ *
+ * Low level, and almost never what a caller wants — `renameCluster` is the
+ * entry point, because naming a cluster also means making sure no other
+ * member of it is carrying a different name. Same shape as `setTracked`:
+ * additive patch, tombstone guard, no revision, no re-embed.
+ */
+export async function setClusterName(
+  id: string,
+  name: string | null,
+): Promise<boolean> {
+  const result = await write(
+    `
+    MATCH (c:Concept {id: $id})
+    WHERE ${ALIVE}
+    SET c.clusterName = $name, c.updatedAt = datetime()
+    RETURN count(c) AS n
+    `,
+    { id, name },
+  );
+  return num(result.records[0]?.get("n")) > 0;
+}
+
+/**
+ * Name the community a note belongs to.
+ *
+ * A cluster has nowhere to keep a name. It is not a row anywhere: it is
+ * recomputed from the link structure on every load, its index is positional
+ * (by size), and adding one link can repartition the graph. So the name goes
+ * on the community's busiest member, and `describeClusters` reads it back
+ * from whichever member carries one. That survives regrouping: when a
+ * cluster splits, the half holding that note keeps the name and the other
+ * half goes back to the automatic label.
+ *
+ * Which note gets written is decided here, not by the caller. The client
+ * sends a member and a string; the server recomputes the grouping, picks the
+ * anchor, and clears every other member, so a cluster can never end up with
+ * two names arguing over it.
+ *
+ * Returns null when there is no live concept with that id, or when the graph
+ * has outgrown the clustering cap and the note is not in any community.
+ */
+export async function renameCluster(
+  memberId: string,
+  name: string | null,
+): Promise<{ named: string; cleared: number } | null> {
+  const concept = await getConcept(memberId);
+  if (!concept) return null;
+
+  const graph = await fullGraph();
+  const clustering = cluster(graph.nodes, graph.edges);
+  const index = clustering.of.get(concept.id);
+  if (index === undefined) return null;
+
+  const members = clustering.clusters[index];
+  const info = describeClusters(graph.nodes, clustering)[index];
+  const anchorId = info?.anchorId ?? concept.id;
+
+  const ok = await setClusterName(anchorId, name);
+  if (!ok) return null;
+
+  // Everyone else in this community gives up any name they were holding, so
+  // the one the legend shows is the only one stored.
+  const others = members.filter((id) => id !== anchorId);
+  const cleared = others.length
+    ? await write(
+        `
+        MATCH (c:Concept) WHERE c.id IN $ids AND c.clusterName IS NOT NULL
+        SET c.clusterName = null, c.updatedAt = datetime()
+        RETURN count(c) AS n
+        `,
+        { ids: others },
+      ).then((r) => num(r.records[0]?.get("n")))
+    : 0;
+
+  return { named: anchorId, cleared };
 }

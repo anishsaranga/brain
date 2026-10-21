@@ -353,6 +353,8 @@ export interface DescribeNodeInput {
   name: string;
   topics: string[];
   degree: number;
+  /** A name a member gives the whole community, or null. */
+  clusterName?: string | null;
 }
 
 export interface ClusterInfo {
@@ -363,6 +365,10 @@ export interface ClusterInfo {
   name: string;
   /** The topic most over-represented here, or null if nothing stands out. */
   topic: string | null;
+  /** A name someone typed, carried by a member, or null. */
+  custom: string | null;
+  /** What to call this cluster on screen: the typed name, else the topic, else the landmark. */
+  label: string;
 }
 
 /**
@@ -422,12 +428,75 @@ export function describeClusters(
       }
     }
 
+    // A typed name beats everything derived. Read from whichever member is
+    // carrying one — the busiest, when more than one somehow is, which keeps
+    // the answer the same every load rather than depending on row order.
+    const carrier = nodesIn.reduce(
+      (best: DescribeNodeInput | null, n) =>
+        !n.clusterName
+          ? best
+          : !best ||
+              n.degree > best.degree ||
+              (n.degree === best.degree && n.name < best.name)
+            ? n
+            : best,
+      null,
+    );
+    const custom = carrier?.clusterName ?? null;
+    const name = anchor?.name ?? "";
+
     return {
       index,
       size: members.length,
       anchorId: anchor?.id ?? members[0] ?? "",
-      name: anchor?.name ?? "",
+      name,
       topic,
+      custom,
+      label: custom ?? topic ?? name,
     };
   });
+}
+
+/**
+ * A hue per cluster.
+ *
+ * Colour used to come from the node's alphabetically-first topic, which on
+ * this graph meant colouring by alphabet: almost every concept carries two to
+ * four topics, there are 95 of them, and the one broad enough to group things
+ * covered 128 of 211 concepts. Clusters are the honest grouping and there are
+ * usually under a dozen, which is a number of colours a person can actually
+ * hold apart.
+ *
+ * ACCENT_HUE is skipped because the accent is also the "tracked" ring. A
+ * cluster drawn in the same green made tracked and untracked nodes of that
+ * cluster impossible to tell apart.
+ *
+ * COMMAS ARE REQUIRED. Cytoscape's colour parser predates the space-separated
+ * `hsl(H S% L%)` syntax and silently falls back to grey on it, with no warning
+ * and no error: every node rendered the same grey while the legend, which is
+ * ordinary CSS and does understand the modern form, showed the right colours.
+ */
+const ACCENT_HUE = 152;
+const ACCENT_GUARD = 20;
+/** Clusters past this share the muted grey, which the legend admits to. */
+export const PALETTE = 14;
+/**
+ * Coprime with PALETTE, so the slots are still each used exactly once and the
+ * wheel is still covered evenly — but consecutive clusters, which sit on
+ * adjacent legend rows, land on opposite sides of it instead of 23° apart.
+ */
+const HUE_STRIDE = 5;
+
+export function clusterColor(index: number, dark: boolean, muted: string): string {
+  if (index >= PALETTE) return muted;
+  const slot = (index * HUE_STRIDE) % PALETTE;
+  const usable = 360 - ACCENT_GUARD * 2;
+  const hue = Math.round((slot * usable) / PALETTE + ACCENT_HUE + ACCENT_GUARD) % 360;
+  // Fourteen flat hues do not hold apart. Alternating lightness gives
+  // neighbours a second dimension to differ in, which is what makes the
+  // wider palette legible rather than just wider.
+  const dim = slot % 2 === 1;
+  return dark
+    ? `hsl(${hue}, 55%, ${dim ? 56 : 64}%)`
+    : `hsl(${hue}, 58%, ${dim ? 44 : 36}%)`;
 }
